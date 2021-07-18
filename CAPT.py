@@ -1,79 +1,15 @@
 import numpy as np
-# import utils
+import utils
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 
-def computeDifferences(u):
-        
-        # Takes as input a tensor of shape
-        #   nSamples x tSamples x 2 x nAgents
-        # or of shape
-        #   nSamples x 2 x nAgents
-        # And returns the elementwise difference u_i - u_j of shape
-        #   nSamples (x tSamples) x 2 x nAgents x nAgents
-        # And the distance squared ||u_i - u_j||^2 of shape
-        #   nSamples (x tSamples) x nAgents x nAgents
-        
-        # Check dimensions
-        assert len(u.shape) == 3 or len(u.shape) == 4
-        # If it has shape 3, which means it's only a single time instant, then
-        # add the extra dimension so we move along assuming we have multiple
-        # time instants
-        if len(u.shape) == 3:
-            u = np.expand_dims(u, 1)
-            hasTimeDim = False
-        else:
-            hasTimeDim = True
-        
-        # Now we have that pos always has shape
-        #   nSamples x tSamples x 2 x nAgents
-        nSamples = u.shape[0]
-        tSamples = u.shape[1]
-        assert u.shape[2] == 2
-        nAgents = u.shape[3]
-        
-        # Compute the difference along each axis. For this, we subtract a
-        # column vector from a row vector. The difference tensor on each
-        # position will have shape nSamples x tSamples x nAgents x nAgents
-        # and then we add the extra dimension to concatenate and obtain a final
-        # tensor of shape nSamples x tSamples x 2 x nAgents x nAgents
-        # First, axis x
-        #   Reshape as column and row vector, respectively
-        uCol_x = u[:,:,0,:].reshape((nSamples, tSamples, nAgents, 1))
-        uRow_x = u[:,:,0,:].reshape((nSamples, tSamples, 1, nAgents))
-        #   Subtract them
-        uDiff_x = uCol_x - uRow_x # nSamples x tSamples x nAgents x nAgents
-        # Second, for axis y
-        uCol_y = u[:,:,1,:].reshape((nSamples, tSamples, nAgents, 1))
-        uRow_y = u[:,:,1,:].reshape((nSamples, tSamples, 1, nAgents))
-        uDiff_y = uCol_y - uRow_y # nSamples x tSamples x nAgents x nAgents
-        # Third, compute the distance tensor of shape
-        #   nSamples x tSamples x nAgents x nAgents
-        uDistSq = uDiff_x ** 2 + uDiff_y ** 2
-        # Finally, concatenate to obtain the tensor of differences
-        #   Add the extra dimension in the position
-        uDiff_x = np.expand_dims(uDiff_x, 2)
-        uDiff_y = np.expand_dims(uDiff_y, 2)
-        #   And concatenate them
-        uDiff = np.concatenate((uDiff_x, uDiff_y), 2)
-        #   nSamples x tSamples x 2 x nAgents x nAgents
-            
-        # Get rid of the time dimension if we don't need it
-        if not hasTimeDim:
-            # (This fails if tSamples > 1)
-            uDistSq = uDistSq.squeeze(1)
-            #   nSamples x nAgents x nAgents
-            uDiff = uDiff.squeeze(1)
-            #   nSamples x 2 x nAgents x nAgents
-            
-        return uDiff, uDistSq
-
-
 class CAPT:
   """
   A wrapper class to execute the CAPT algorithm by Matthew Turpin
-  (https://journals.sagepub.com/doi/10.1177/0278364913515307). 
+  (https://journals.sagepub.com/doi/10.1177/0278364913515307). Certain 
+  parts of this code are originally from the Alelab GNN library 
+  (https://github.com/alelab-upenn).
   ...
 
   Attributes
@@ -102,6 +38,7 @@ class CAPT:
       self.agent_init_pos = self.compute_agents_initial_positions(n_agents, 
                                                                n_samples, 
                                                                comm_radius)
+      
       
       self.goal_init_pos = self.compute_goals_initial_positions(self.n_goals, 
                                                                 n_samples)
@@ -132,22 +69,15 @@ class CAPT:
       
       min_dist = min_dist * (1. + self.zeroTolerance)
       comm_radius = comm_radius * (1. - self.zeroTolerance)
-      
-      # If there are other keys in the kwargs argument, they will just be
-      # ignored
-
-      # Let's start by setting the fixed position
+   
           
-      # This grid has a distance that depends on the desired min_dist and
-      # the comm_radius
+      # This is the fixed distance between points in the grid
       distFixed = (comm_radius + min_dist)/(2.*np.sqrt(2))
-      #   This is the fixed distance between points in the grid
+      
+      # This is the standard deviation of a uniform perturbation around
+      # the fixed point.
       distPerturb = (comm_radius - min_dist)/(4.*np.sqrt(2))
-      #   This is the standard deviation of a uniform perturbation around
-      #   the fixed point.
-      # This should guarantee that, even after the perturbations, there
-      # are no agents below min_dist, and that all agents have at least
-      # one other agent within comm_radius.
+      
       
       # How many agents per axis
       n_agentsPerAxis = int(np.ceil(np.sqrt(n_agents)))
@@ -183,7 +113,7 @@ class CAPT:
       
       # Now, check that the conditions are met:
       #   Compute square distances
-      _, distSq = computeDifferences(np.expand_dims(initPos, 1))
+      _, distSq = utils.computeDifferences(np.expand_dims(initPos, 1))
 
       # Get rid of the "time" dimension that arises from using the 
       # method to compute distances
@@ -197,7 +127,7 @@ class CAPT:
 
       assert min_distSq >= min_dist ** 2
               
-      return initPos.reshape(n_samples, 2, n_agents)
+      return initPos.reshape(n_samples, n_agents, 2)
 
   def compute_goals_initial_positions(self, n_goals, n_samples):
     """ 
@@ -219,21 +149,25 @@ class CAPT:
     -------
     np.array (n_samples x 2 x n_agents) 
     """
-    x_min = np.min(self.agent_init_pos[0, 0, :]) - 3
-    y_min = np.min(self.agent_init_pos[0, 1, :]) - 3
-    x_max = np.max(self.agent_init_pos[0, 0, :]) + 3
-    y_max = np.max(self.agent_init_pos[0, 1, :]) + 3
+    
+    # Find max/min positions
+    x_min = np.min(self.agent_init_pos[0, 0, :]) - 10
+    y_min = np.min(self.agent_init_pos[0, 1, :]) - 10
+    x_max = np.max(self.agent_init_pos[0, 0, :]) + 10
+    y_max = np.max(self.agent_init_pos[0, 1, :]) + 10
 
-    x = np.random.uniform(low = x_min, high = x_max, size=30)
-    y = np.random.uniform(low = y_min, high = y_max, size=30)
+    # Samples uniform distribution
+    x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
+    y = np.random.uniform(low = y_min, high = y_max, size=n_goals)
 
     
-    goals = np.stack((x, y), axis=0)  
+    # Creates goals array
+    goals = np.stack((x, y), axis=1)  
     goals = np.repeat(np.expand_dims(goals, 0), n_samples, axis = 0)
 
     return goals
 
-  def plot_initial_posiitons(self):
+  def plot_initial_positions(self):
     """ 
     Plots initial positions of the goals and agents
     
@@ -246,8 +180,8 @@ class CAPT:
     N/A
     """
     
-    plt.scatter(self.goal_init_pos[0, 0, :], self.goal_init_pos[0, 1, :], label="goals")
-    plt.scatter(self.agent_init_pos[0, 0, :], self.agent_init_pos[0, 1, :], label="agents")
+    plt.scatter(self.goal_init_pos[0, :, 0], self.goal_init_pos[0, :, 1], label="goals")
+    plt.scatter(self.agent_init_pos[0, :, 0], self.agent_init_pos[0, :, 1], label="agents")
     plt.title("Initial Positions")
     plt.legend()
     plt.show()
@@ -265,19 +199,23 @@ class CAPT:
     np.array (n_agents x n_goals)
     """
     
-    agents = self.agent_init_pos[0,:,:].T
-    goals = self.goal_init_pos[0,:,:].T
-    print(agents.shape)
-
+    # Obtains the initial posiition arrays
+    agents = self.agent_init_pos[0,:,:]
+    goals = self.goal_init_pos[0,:,:]
+    
+    
+    # Calculates distance matrix
     distance_matrix = cdist(agents, goals)
 
+    # Obtains optimal linear combination
     row_ind, col_ind = linear_sum_assignment(distance_matrix)
 
+    # Obtains assignment matrix (binary)
     phi = np.zeros((self.n_agents, self.n_agents))
     phi[row_ind, col_ind] = 1
 
     return phi
 
-capt = CAPT(30, 5, 0.1, 3)
-capt.plot()
+capt = CAPT(3, 5, 0.1, 3)
+capt.plot_initial_positions()
 phi = capt.compute_assignment_matrix()
