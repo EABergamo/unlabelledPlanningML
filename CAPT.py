@@ -97,14 +97,14 @@ class CAPT:
       self.n_agents = n_agents
       self.comm_radius = comm_radius
       self.min_dist = min_dist
-      self.n_samples = n_samples
       self.n_goals = n_agents
 
       self.agent_init_pos = self.compute_agents_initial_positions(n_agents, 
                                                                n_samples, 
                                                                comm_radius)
       
-      self.goal_init_pos = self.compute_goals_initial_positions(self.n_goals)
+      self.goal_init_pos = self.compute_goals_initial_positions(self.n_goals, 
+                                                                n_samples)
 
   def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
                                   min_dist = 0.1, **kwargs):
@@ -199,7 +199,26 @@ class CAPT:
               
       return initPos.reshape(n_samples, 2, n_agents)
 
-  def compute_goals_initial_positions(self, n_goals):
+  def compute_goals_initial_positions(self, n_goals, n_samples):
+    """ 
+    Generates a NumPy array with the 
+    initial x, y position for each of the n_goals
+    
+    Parameters
+    ----------
+    n_agents : int
+        The total number of goals that will take part in the simulation
+    n_samples : int
+        The total number of samples.
+    comm_radius : double
+        The communication radius between agents (determines initial spacing between agents)
+    min_dist : double
+        The minimum distance between each agent
+    
+    Returns
+    -------
+    np.array (n_samples x 2 x n_agents) 
+    """
     x_min = np.min(self.agent_init_pos[0, 0, :]) - 3
     y_min = np.min(self.agent_init_pos[0, 1, :]) - 3
     x_max = np.max(self.agent_init_pos[0, 0, :]) + 3
@@ -210,11 +229,23 @@ class CAPT:
 
     
     goals = np.stack((x, y), axis=0)  
-    goals = np.repeat(np.expand_dims(goals, 0), self.n_samples, axis = 0)
+    goals = np.repeat(np.expand_dims(goals, 0), n_samples, axis = 0)
 
     return goals
 
-  def plot(self):
+  def plot_initial_posiitons(self):
+    """ 
+    Plots initial positions of the goals and agents
+    
+    Parameters
+    ----------
+    N/A
+    
+    Returns
+    -------
+    N/A
+    """
+    
     plt.scatter(self.goal_init_pos[0, 0, :], self.goal_init_pos[0, 1, :], label="goals")
     plt.scatter(self.agent_init_pos[0, 0, :], self.agent_init_pos[0, 1, :], label="agents")
     plt.title("Initial Positions")
@@ -222,6 +253,18 @@ class CAPT:
     plt.show()
 
   def compute_assignment_matrix(self):
+    """ 
+    Computes assignment matrix using the Hungarian Algorithm
+    
+    Parameters
+    ----------
+    N/A
+    
+    Returns
+    -------
+    np.array (n_agents x n_goals)
+    """
+    
     agents = self.agent_init_pos[0,:,:].T
     goals = self.goal_init_pos[0,:,:].T
     print(agents.shape)
