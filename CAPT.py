@@ -257,20 +257,44 @@ class CAPT:
 
         return trajectory
     
-    def plot_trajectories(self):
-        trajectories = []
-
-        for t in np.arange(0, 5, 0.1):
-            trajectories.append(self.compute_trajectory(t))
-            plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
-                        label="agents", marker='x', color='r')
-            plt.scatter(trajectories[-1][:, 0], 
-                        trajectories[-1][:, 1], marker='.', color='k')
+    def compute_full_trajectory(self, plot=False):
+        """ 
+        Computes the matrix X(t) (agent location) for all t such
+        that t_0 <= t <= t_f and optionally plots it.
+        
+        Parameters
+        ----------
+        plot : boolean
+            determines whether to plot the trajectory or not
+        
+        Returns
+        -------
+        np.array ((t_f / 0.1) x n_agents x 2)
+        
+        """
+        last_index = int(self.t_f / 0.1)
+        
+        complete_trajectory = np.zeros((last_index, self.n_agents, 2))
+        
+        for index in np.arange(0, last_index):
+            t = index * 0.1
+            complete_trajectory[index, :, :] = (self.compute_trajectory(t))
+            
+            if (plot):
+                plt.scatter(complete_trajectory[index][:, 0], 
+                            complete_trajectory[index][:, 1], 
+                            marker='.', 
+                            color='k')
           
-        plt.grid()    
-        plt.title('Trajectories')
-
+        if (plot):    
+            plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
+                            label="agents", marker='x', color='r')
+            plt.grid()    
+            plt.title('Trajectories')
+        
+        return complete_trajectory
     
-
+capt = CAPT(50, 6, 2, 1, 5)
+capt.compute_full_trajectory(plot=True)
 
 
