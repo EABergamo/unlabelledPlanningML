@@ -28,13 +28,14 @@ class CAPT:
     """
 
     def __init__(self, n_agents, comm_radius, min_dist, n_samples, 
-                 max_vel = None, t_f=None):
+                 max_vel = None, t_f=None, max_accel = 5):
         self.zeroTolerance = 1e-7
         self.n_agents = n_agents
         self.comm_radius = comm_radius
         self.min_dist = min_dist
         self.n_goals = n_agents
         self.n_samples = n_samples
+        self.max_accel = max_accel
         
         
     
@@ -313,13 +314,15 @@ class CAPT:
                     plt.scatter(complete_trajectory[sample, index, :, 0], 
                                 complete_trajectory[sample, index, :, 1], 
                                 marker='.', 
-                                color='k')
+                                color='k',
+                                label='')
           
         if (plot):    
             plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
-                            label="agents", marker='x', color='r')
+                            label="goal", marker='x', color='r')
             plt.grid()    
             plt.title('Trajectories')
+            plt.legend()
         
         return complete_trajectory
     
@@ -352,14 +355,16 @@ class CAPT:
         
         return vel
     
-    def compute_acceleration(self):
+    def compute_acceleration(self, clip=True):
         """ 
         Computes the matrix with the acceleration (a_x, a_y) of each agent for 
         all t such that t_0 <= t <= t_f.
         
         Parameters
         ----------
-        N/A
+        clip : boolean
+            Determines wheter to limit the acceleration to the inteval
+            [-max_accel, max_accel]
         
         Returns
         -------
@@ -379,11 +384,14 @@ class CAPT:
         accel_0 = np.zeros((self.n_samples, 1, self.n_agents, 2))
         accel = np.concatenate((accel_0, accel), axis=1)
         
+        if (clip):
+            accel = np.clip(accel[:,:,:,:], -self.max_accel, self.max_accel)
+        
         return accel
     
-capt = CAPT(50, 6, 2, 3, max_vel = 10, t_f = 30)
-traj = capt.capt_trajectory(plot=True)[0]
+capt = CAPT(50, 6, 2, 3, max_vel = 10)
 
+traj = capt.capt_trajectory(plot=True)[0]
 vel = capt.compute_velocity()[0]
 accel = capt.compute_acceleration()[0]
 
