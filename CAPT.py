@@ -77,7 +77,7 @@ class CAPT:
     
         Returns
         -------
-        np.array (n_samples x 2 x n_agents) 
+        np.array (n_samples x n_agents x 2) 
         """
         
         assert min_dist * (1.+self.zeroTolerance) <= comm_radius * (1.-self.zeroTolerance)
@@ -148,7 +148,7 @@ class CAPT:
         
         Returns
         -------
-        np.array (n_samples x 2 x n_agents) 
+        np.array (n_samples x n_goals x 2) 
         """
         
         # Find max/min positions
@@ -293,15 +293,15 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        last_index = int(self.t_f / 0.1)
+        t_samples = int(self.t_f / 0.1)
         
         complete_trajectory = np.zeros((self.n_samples, 
-                                        last_index, 
+                                        t_samples, 
                                         self.n_agents, 
                                         2))
         
         for sample in range(0, self.n_samples):
-            for index in np.arange(0, last_index):
+            for index in np.arange(0, t_samples):
                 t = index * 0.1
                 complete_trajectory[sample, index, :, :] = (self.compute_trajectory(sample, t))
                 
@@ -358,7 +358,7 @@ class CAPT:
         Parameters
         ----------
         clip : boolean
-            Determines wheter to limit the acceleration to the inteval
+            Determines wheter to limit the acceleration to the interval
             [-max_accel, max_accel]
         
         Returns
@@ -384,11 +384,67 @@ class CAPT:
         
         return accel
     
-capt = CAPT(50, 6, 2, 3, max_vel = 10)
+    def simulated_trajectory(self, plot=True):
+        """ 
+        Calculates trajectory using the calculated acceleration. This function
+        is particularly useful when clip is set to True in 
+        .compute_acceleration since it will generate trajectories that are
+        physically feasible.
+        
+        Parameters
+        ----------
+        N/A
+        
+        Returns
+        -------
+        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        
+        """
+        t_samples = int(self.t_f / 0.1)
+        
+        accel = self.compute_acceleration(clip=True)
+        vel = np.zeros((self.n_samples, 
+                        t_samples, 
+                        self.n_agents, 
+                        2))
+        pos = np.zeros((self.n_samples, 
+                        t_samples, 
+                        self.n_agents, 
+                        2))
+        
+        pos[:, 0, :, :] = self.X
+        
+        for sample in range(0, self.n_samples):
+            for t in np.arange(1, t_samples):
+                
+                vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
+                    + accel[sample, t, :, :] * 0.1
+                    
+                pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
+                    + vel[sample, t - 1, :, :] * 0.1 \
+                    + accel[sample, t, :, :] * 0.1**2 / 2
+                
+                if (plot and sample == self.n_samples - 1):
+                    plt.scatter(pos[sample, t, :, 0], 
+                            pos[sample, t, :, 1], 
+                            marker='.', 
+                            color='k',
+                            label='')
+          
+        if (plot):    
+            plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
+                            label="goal", marker='x', color='r')
+            plt.grid()    
+            plt.title('Trajectories (simulated)')
+            plt.legend()
+                    
+        return pos
 
-traj = capt.capt_trajectory(plot=True)[0]
-vel = capt.compute_velocity()[0]
-accel = capt.compute_acceleration()[0]
+                
+capt = CAPT(50, 6, 2, 3, max_vel = 5, t_f = 12, max_accel = 10)
+
+X_t = capt.capt_trajectory()[0]
+traj = capt.simulated_trajectory()[0]
 
 
 
