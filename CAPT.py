@@ -2,8 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
-from matplotlib import animation
-
 
 class CAPT:
     """
@@ -29,12 +27,14 @@ class CAPT:
     computeInitialPositions : np.array (n_samples x 2 x n_agents)
     """
 
-    def __init__(self, n_agents, comm_radius, min_dist, n_samples) -> None:
+    def __init__(self, n_agents, comm_radius, min_dist, n_samples, t_f):
         self.zeroTolerance = 1e-7
         self.n_agents = n_agents
         self.comm_radius = comm_radius
         self.min_dist = min_dist
         self.n_goals = n_agents
+        
+        self.t_f = t_f
     
         self.X = self.compute_agents_initial_positions(n_agents, 
                                                                  n_samples, 
@@ -82,7 +82,6 @@ class CAPT:
         # This is the standard deviation of a uniform perturbation around
         # the fixed point.
         distPerturb = (comm_radius - min_dist)/(4.*np.sqrt(2))
-        
         
         # How many agents per axis
         n_agentsPerAxis = int(np.ceil(np.sqrt(n_agents)))
@@ -173,8 +172,8 @@ class CAPT:
         N/A
         """
         
-        plt.scatter(self.X[0, :, 0], self.X[0, :, 1], label="goals")
-        plt.scatter(self.G[0, :, 0], self.G[0, :, 1], label="agents")
+        plt.scatter(self.X[0, :, 0], self.X[0, :, 1], label="goals", marker='.')
+        plt.scatter(self.G[0, :, 0], self.G[0, :, 1], label="agents", marker='x')
         plt.title("Initial Positions")
         plt.legend()
         plt.show()
@@ -209,7 +208,7 @@ class CAPT:
       
         return phi
     
-    def get_beta(self, t, t_0, t_f):
+    def get_beta(self, t):
         """ 
         Computes the polynomial function of time Beta as described in
         the CAPT paper.
@@ -218,15 +217,14 @@ class CAPT:
         ----------
         t : double
             time index such that we obtain β(t)
-        t_0 : double
-            initial time index
-        t_f : double
-            final time index
         
         Returns
         -------
         double (β(t))
         """
+        
+        t_0 = 0
+        t_f = self.t_f
         
         alpha_0 = -t_0 / (t_f - t_0)
         alpha_1 = 1 / (t_f - t_0)
@@ -234,17 +232,45 @@ class CAPT:
         return (alpha_0 * 1 + alpha_1 * t)
 
     def compute_trajectory(self, t):
-        beta = self.get_beta(t, 0, 5)
-        Phi = self.phi
+        """ 
+        Computes the matrix X(t) (agent location) for the input t
+        
+        Parameters
+        ----------
+        t : double
+            time index such that we obtain X(t)
+        
+        Returns
+        -------
+        np.array (n_agents x 2)
+        """
+        
+        beta = self.get_beta(t)
+        phi = self.phi
         G = self.G[0,:,:]
         X = self.X[0,:,:]
         N = self.n_agents
         I = np.eye(N)
         
         trajectory = (1 - beta) * X \
-            + beta * (Phi @ G + (I - Phi @ Phi.T) @ X)
-        
+            + beta * (phi @ G + (I - phi @ phi.T) @ X)
+
         return trajectory
+    
+    def plot_trajectories(self):
+        trajectories = []
+
+        for t in np.arange(0, 5, 0.1):
+            trajectories.append(self.compute_trajectory(t))
+            plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
+                        label="agents", marker='x', color='r')
+            plt.scatter(trajectories[-1][:, 0], 
+                        trajectories[-1][:, 1], marker='.', color='k')
+          
+        plt.grid()    
+        plt.title('Trajectories')
+
+    
 
 
 
