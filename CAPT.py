@@ -36,13 +36,10 @@ class CAPT:
         self.n_goals = n_agents
         self.n_samples = n_samples
         self.max_accel = max_accel
-        
-        
     
         self.X = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
                                                        comm_radius)
-        
         
         self.G = self.compute_goals_initial_positions(self.n_goals, 
                                                       n_samples)
@@ -58,9 +55,7 @@ class CAPT:
             self.t_f = self.max_dist / max_vel
         else:
             self.t_f = t_f
-            
-        
-        
+              
         self.Phi = np.kron(self.phi, np.eye(self.n_goals)) # TODO: required?
     
     def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
