@@ -7,7 +7,7 @@ class CAPT:
     """
     A wrapper class to execute the CAPT algorithm by Matthew Turpin
     (https://journals.sagepub.com/doi/10.1177/0278364913515307). Certain 
-    parts this code(.compute_agents_initial_positions) are originally 
+    parts this code (.compute_agents_initial_positions) are originally 
     from the Alelab GNN library (https://github.com/alelab-upenn).
     ...
     
@@ -33,20 +33,21 @@ class CAPT:
         self.comm_radius = comm_radius
         self.min_dist = min_dist
         self.n_goals = n_agents
+        self.n_samples = n_samples
         
         self.t_f = t_f
     
         self.X = self.compute_agents_initial_positions(n_agents, 
-                                                                 n_samples, 
-                                                                 comm_radius)
+                                                       n_samples, 
+                                                       comm_radius)
         
         
         self.G = self.compute_goals_initial_positions(self.n_goals, 
-                                                                  n_samples)
+                                                      n_samples)
         
-        self.phi = self.compute_assignment_matrix()
+        self.phi = self.compute_assignment_matrix(0)
         
-        self.Phi = np.kron(self.phi, np.eye(self.n_goals))
+        self.Phi = np.kron(self.phi, np.eye(self.n_goals)) # TODO: required?
     
     def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
                                         min_dist = 0.1, **kwargs):
@@ -119,7 +120,6 @@ class CAPT:
         initPos = fixedPos + perturbPos
               
         return initPos
-        # return initPos.reshape(n_samples, n_agents, 2)
     
     def compute_goals_initial_positions(self, n_goals, n_samples):
         """ 
@@ -178,7 +178,7 @@ class CAPT:
         plt.legend()
         plt.show()
     
-    def compute_assignment_matrix(self):
+    def compute_assignment_matrix(self, sample):
         """ 
         Computes assignment matrix using the Hungarian Algorithm
         
@@ -188,7 +188,7 @@ class CAPT:
         
         Returns
         -------
-        np.array (n_agents x n_goals)
+        np.array (n_samples x n_agents x n_goals)
         """
         
         # Obtains the initial posiition arrays
@@ -205,6 +205,11 @@ class CAPT:
         # Obtains assignment matrix (binary)
         phi = np.zeros((self.n_agents, self.n_agents))
         phi[row_ind, col_ind] = 1
+        
+        # And repeat for the number of samples we want to generate
+        phi = np.repeat(np.expand_dims(phi, 0), 
+                        self.n_samples,
+                        axis = 0)
       
         return phi
     
@@ -231,7 +236,7 @@ class CAPT:
         
         return (alpha_0 * 1 + alpha_1 * t)
 
-    def compute_trajectory(self, t):
+    def compute_trajectory(self, sample, t):
         """ 
         Computes the matrix X(t) (agent location) for the input t
         
@@ -246,9 +251,9 @@ class CAPT:
         """
         
         beta = self.get_beta(t)
-        phi = self.phi
-        G = self.G[0,:,:]
-        X = self.X[0,:,:]
+        phi = self.phi[sample,:,:]
+        G = self.G[sample,:,:]
+        X = self.X[sample,:,:]
         N = self.n_agents
         I = np.eye(N)
         
@@ -269,22 +274,26 @@ class CAPT:
         
         Returns
         -------
-        np.array ((t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
         last_index = int(self.t_f / 0.1)
         
-        complete_trajectory = np.zeros((last_index, self.n_agents, 2))
+        complete_trajectory = np.zeros((self.n_samples, 
+                                        last_index, 
+                                        self.n_agents, 
+                                        2))
         
-        for index in np.arange(0, last_index):
-            t = index * 0.1
-            complete_trajectory[index, :, :] = (self.compute_trajectory(t))
-            
-            if (plot):
-                plt.scatter(complete_trajectory[index][:, 0], 
-                            complete_trajectory[index][:, 1], 
-                            marker='.', 
-                            color='k')
+        for sample in range(0, self.n_samples):
+            for index in np.arange(0, last_index):
+                t = index * 0.1
+                complete_trajectory[sample, index, :, :] = (self.compute_trajectory(sample, t))
+                
+                if (plot and sample == self.n_samples - 1):
+                    plt.scatter(complete_trajectory[sample, index, :, 0], 
+                                complete_trajectory[sample, index, :, 1], 
+                                marker='.', 
+                                color='k')
           
         if (plot):    
             plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
@@ -294,7 +303,69 @@ class CAPT:
         
         return complete_trajectory
     
-capt = CAPT(50, 6, 2, 1, 5)
-capt.compute_full_trajectory(plot=True)
+    def compute_velocity(self):
+        """ 
+        Computes the matrix with the velocity (v_x, v_y) of each agent for all t such
+        that t_0 <= t <= t_f.
+        
+        Parameters
+        ----------
+        N/A
+        
+        Returns
+        -------
+        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        
+        """
+        complete_trajectory = self.compute_full_trajectory(plot=False)
+        
+        # Calculate the difference at each step
+        v_x = np.diff(complete_trajectory[:,:,:,0], axis=1) / 0.1
+        v_y = np.diff(complete_trajectory[:,:,:,1], axis=1) / 0.1
+        
+        # Stack the vectors
+        vel = np.stack((v_x, v_y), axis=-1)
+        
+        # Add velocity for t = 0
+        v_0 = np.zeros((self.n_samples, 1, 50, 2))
+        vel = np.concatenate((v_0, vel), axis=1)
+        
+        return vel
+    
+    def compute_acceleration(self):
+        """ 
+        Computes the matrix with the acceleration (a_x, a_y) of each agent for 
+        all t such that t_0 <= t <= t_f.
+        
+        Parameters
+        ----------
+        N/A
+        
+        Returns
+        -------
+        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        
+        """
+        complete_velocity = self.compute_velocity()
+        
+        # Calculate the difference at each step
+        a_x = np.diff(complete_velocity[:,:,:,0], axis=1) / 0.1
+        a_y = np.diff(complete_velocity[:,:,:,1], axis=1) / 0.1
+        
+        # Stack the vectors
+        accel = np.stack((a_x, a_y), axis=-1)
+        
+        # Add velocity for t = 0
+        accel_0 = np.zeros((self.n_samples, 1, 50, 2))
+        accel_0 = np.concatenate((accel_0, accel), axis=1)
+        
+        return accel
+    
+capt = CAPT(50, 6, 2, 3, 5)
+traj = capt.compute_full_trajectory(plot=True)[0]
+
+vel = capt.compute_velocity()[0]
+accel = capt.compute_acceleration()[0]
+
 
 
