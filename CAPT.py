@@ -27,7 +27,8 @@ class CAPT:
     computeInitialPositions : np.array (n_samples x 2 x n_agents)
     """
 
-    def __init__(self, n_agents, comm_radius, min_dist, n_samples, t_f):
+    def __init__(self, n_agents, comm_radius, min_dist, n_samples, 
+                 max_vel = None, t_f=None):
         self.zeroTolerance = 1e-7
         self.n_agents = n_agents
         self.comm_radius = comm_radius
@@ -35,7 +36,7 @@ class CAPT:
         self.n_goals = n_agents
         self.n_samples = n_samples
         
-        self.t_f = t_f
+        
     
         self.X = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
@@ -45,7 +46,19 @@ class CAPT:
         self.G = self.compute_goals_initial_positions(self.n_goals, 
                                                       n_samples)
         
-        self.phi = self.compute_assignment_matrix(0)
+        self.phi, self.max_dist = self.compute_assignment_matrix(0)
+        
+        if (max_vel is None):
+            self.max_vel = 10
+        else:
+            self.max_vel = max_vel
+        
+        if (t_f is None):
+            self.t_f = self.max_dist / max_vel
+        else:
+            self.t_f = t_f
+            
+        
         
         self.Phi = np.kron(self.phi, np.eye(self.n_goals)) # TODO: required?
     
@@ -189,6 +202,7 @@ class CAPT:
         Returns
         -------
         np.array (n_samples x n_agents x n_goals)
+        double (max distance)
         """
         
         # Obtains the initial posiition arrays
@@ -206,12 +220,14 @@ class CAPT:
         phi = np.zeros((self.n_agents, self.n_agents))
         phi[row_ind, col_ind] = 1
         
+        max_dist = np.max(phi @ distance_matrix)
+        
         # And repeat for the number of samples we want to generate
         phi = np.repeat(np.expand_dims(phi, 0), 
                         self.n_samples,
                         axis = 0)
       
-        return phi
+        return phi, max_dist
     
     def get_beta(self, t):
         """ 
@@ -262,10 +278,14 @@ class CAPT:
 
         return trajectory
     
-    def compute_full_trajectory(self, plot=False):
+    def capt_trajectory(self, plot=False):
         """ 
         Computes the matrix X(t) (agent location) for all t such
-        that t_0 <= t <= t_f and optionally plots it.
+        that t_0 <= t <= t_f and optionally plots it. It will use the CAPT
+        algorithm with no modifications; as such, it might produce trajectories
+        that require unfeasiable velocities/accelerations. It will, however,
+        produce the right *direction* of the trajectories - this can be used
+        later with other functions to generate a more realistic trajectory.
         
         Parameters
         ----------
@@ -317,7 +337,7 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        complete_trajectory = self.compute_full_trajectory(plot=False)
+        complete_trajectory = self.capt_trajectory(plot=False)
         
         # Calculate the difference at each step
         v_x = np.diff(complete_trajectory[:,:,:,0], axis=1) / 0.1
@@ -356,13 +376,13 @@ class CAPT:
         accel = np.stack((a_x, a_y), axis=-1)
         
         # Add velocity for t = 0
-        accel_0 = np.zeros((self.n_samples, 1, 50, 2))
-        accel_0 = np.concatenate((accel_0, accel), axis=1)
+        accel_0 = np.zeros((self.n_samples, 1, self.n_agents, 2))
+        accel = np.concatenate((accel_0, accel), axis=1)
         
         return accel
     
-capt = CAPT(50, 6, 2, 3, 5)
-traj = capt.compute_full_trajectory(plot=True)[0]
+capt = CAPT(50, 6, 2, 3, max_vel = 10, t_f = 30)
+traj = capt.capt_trajectory(plot=True)[0]
 
 vel = capt.compute_velocity()[0]
 accel = capt.compute_acceleration()[0]
