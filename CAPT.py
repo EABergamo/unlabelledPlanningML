@@ -7,8 +7,8 @@ class CAPT:
     """
     A wrapper class to execute the CAPT algorithm by Matthew Turpin
     (https://journals.sagepub.com/doi/10.1177/0278364913515307). Certain 
-    parts of this code are originally from the Alelab GNN library 
-    (https://github.com/alelab-upenn).
+    parts this code(.compute_agents_initial_positions) are originally 
+    from the Alelab GNN library (https://github.com/alelab-upenn).
     ...
     
     Attributes
