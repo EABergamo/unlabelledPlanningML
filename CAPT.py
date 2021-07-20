@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 import utils
+import timeit
 
 zeroTolerance = utils.zeroTolerance
 
@@ -171,10 +172,10 @@ class CAPT:
         """
         
         # Find max/min positions
-        x_min = np.min(self.X[0, :, 0])
-        y_min = np.min(self.X[0, :, 1])
-        x_max = np.max(self.X[0, :, 0])
-        y_max = np.max(self.X[0, :, 1])
+        x_min = np.min(self.X[0, :, 0]) - 5
+        y_min = np.min(self.X[0, :, 1]) - 5
+        x_max = np.max(self.X[0, :, 0]) + 5
+        y_max = np.max(self.X[0, :, 1]) + 5
       
         # Samples uniform distribution
         x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
@@ -372,13 +373,15 @@ class CAPT:
                                     normalize_graph = True,
                                     doPrint = True):
         
+        if (doPrint):
+            print('\tComputing communication graph...', end = ' ', flush = True)
         
         pos = np.transpose(pos, (0, 1, 3, 2))   
         
         maxBatchSize = 100
         maxTimeSamples = 200
         kernelScale = 1
-        
+                
         assert comm_radius > 0
         assert len(pos.shape) == 4
         n_samples = pos.shape[0]
@@ -421,7 +424,6 @@ class CAPT:
                 
                 # For each time instant
                 for t in range(tSamples):
-                    
                     # Let's start by computing the distance squared
                     _, distSq = utils.computeDifferences(posBatch[:,t,:,:])
                     # Apply the Kernel
@@ -529,6 +531,7 @@ class CAPT:
         if doPrint:
             # Erase the percentage
             print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
             
         return graphMatrix
         
@@ -547,7 +550,7 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        complete_trajectory = self.capt_trajectory(plot=False)
+        complete_trajectory = self.capt_trajectory()
         
         # Calculate the difference at each step
         v_x = np.diff(complete_trajectory[:,:,:,0], axis=1) / 0.1
@@ -641,18 +644,15 @@ class CAPT:
         return pos
 
 
-np.random.seed(42)
-sample = 0
-
-import timeit
 
 start = timeit.default_timer()
 
-capt = CAPT(50, 6, 2, n_samples=100, max_vel = 5, t_f = 20, max_accel = 5)
+sample = 0 # sample to graph    
 
-X_t = capt.trajectory
+capt = CAPT(50, 6, 2, n_samples=20, t_f = 30, max_vel = 3, max_accel = 3)
+X_t = capt.simulated_trajectory()
 
-for t in range(0, 200):
+for t in range(0, X_t.shape[1]):
     plt.scatter(X_t[sample, t, :, 0], 
                 X_t[sample, t, :, 1], 
                 marker='.', 
@@ -665,12 +665,13 @@ plt.grid()
 plt.title('Trajectories')
 plt.legend()
 
+a = capt.compute_acceleration()[0]
+
+
 stop = timeit.default_timer()
 
 print()
-print('\tTotal time: ', stop - start, 's') 
-
-graph = capt.comm_graph[0]
+print('\tTotal time: ', stop - start, 's')
 
 
 

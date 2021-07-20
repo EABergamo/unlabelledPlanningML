@@ -66,3 +66,15 @@ def computeDifferences(u):
             #   nSamples x 2 x nAgents x nAgents
             
         return uDiff, uDistSq
+
+def invertTensorEW(x):
+    
+    # Elementwise inversion of a tensor where the 0 elements are kept as zero.
+    # Warning: Creates a copy of the tensor
+    xInv = x.copy() # Copy the matrix to invert
+    # Replace zeros for ones.
+    xInv[x < zeroTolerance] = 1. # Replace zeros for ones
+    xInv = 1./xInv # Now we can invert safely
+    xInv[x < zeroTolerance] = 0. # Put back the zeros
+    
+    return xInv
