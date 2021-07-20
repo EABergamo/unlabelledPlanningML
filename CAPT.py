@@ -39,12 +39,15 @@ class CAPT:
     
         self.X = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
-                                                       comm_radius)
+                                                       comm_radius,
+                                                       min_dist = min_dist)
         
         self.G = self.compute_goals_initial_positions(self.n_goals, 
-                                                      n_samples)
+                                                      n_samples,
+                                                      min_dist)
         
-        self.phi, self.max_dist = self.compute_assignment_matrix(0)
+        self.phi = self.compute_assignment_matrix(self.X, 
+                                                                 self.G)
         
         if (max_vel is None):
             self.max_vel = 10
@@ -52,7 +55,7 @@ class CAPT:
             self.max_vel = max_vel
         
         if (t_f is None):
-            self.t_f = self.max_dist / max_vel
+            self.t_f = 10 / max_vel
         else:
             self.t_f = t_f
               
@@ -130,7 +133,7 @@ class CAPT:
               
         return initPos
     
-    def compute_goals_initial_positions(self, n_goals, n_samples):
+    def compute_goals_initial_positions(self, n_goals, n_samples, min_dist):
         """ 
         Generates a NumPy array with the 
         initial x, y position for each of the n_goals
@@ -152,10 +155,10 @@ class CAPT:
         """
         
         # Find max/min positions
-        x_min = np.min(self.X[0, :, 0]) - 10
-        y_min = np.min(self.X[0, :, 1]) - 10
-        x_max = np.max(self.X[0, :, 0]) + 10
-        y_max = np.max(self.X[0, :, 1]) + 10
+        x_min = np.min(self.X[0, :, 0])
+        y_min = np.min(self.X[0, :, 1])
+        x_max = np.max(self.X[0, :, 0])
+        y_max = np.max(self.X[0, :, 1])
       
         # Samples uniform distribution
         x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
@@ -165,6 +168,15 @@ class CAPT:
         # Creates goals array
         goals = np.stack((x, y), axis=1)  
         goals = np.repeat(np.expand_dims(goals, 0), n_samples, axis = 0)
+        
+        dist_pertub = (min_dist)/(4.*np.sqrt(2))
+        
+        # Now generate the noise
+        pertubation = np.random.uniform(low = -dist_pertub,
+                                        high = dist_pertub,
+                                        size = (n_samples, n_goals,  2))
+        
+        goals = goals + pertubation
       
         return goals
     
@@ -187,7 +199,7 @@ class CAPT:
         plt.legend()
         plt.show()
     
-    def compute_assignment_matrix(self, sample):
+    def compute_assignment_matrix(self, X, G):
         """ 
         Computes assignment matrix using the Hungarian Algorithm
         
@@ -201,29 +213,25 @@ class CAPT:
         double (max distance)
         """
         
-        # Obtains the initial posiition arrays
-        agents = self.X[0,:,:]
-        goals = self.G[0,:,:]
+        n_samples = self.n_samples
+        phi = np.zeros((n_samples, self.n_agents, self.n_agents))
+
         
-        
-        # Calculates distance matrix
-        distance_matrix = cdist(agents, goals)
-      
-        # Obtains optimal linear combination
-        row_ind, col_ind = linear_sum_assignment(distance_matrix)
-      
-        # Obtains assignment matrix (binary)
-        phi = np.zeros((self.n_agents, self.n_agents))
-        phi[row_ind, col_ind] = 1
-        
-        max_dist = np.max(phi @ distance_matrix)
-        
-        # And repeat for the number of samples we want to generate
-        phi = np.repeat(np.expand_dims(phi, 0), 
-                        self.n_samples,
-                        axis = 0)
-      
-        return phi, max_dist
+        for sample in range(0, n_samples):
+            # Obtains the initial posiition arrays
+            agents = self.X[sample,:,:]
+            goals = self.G[sample,:,:]
+            
+            # Calculates distance matrix
+            distance_matrix = cdist(agents, goals)
+          
+            # Obtains optimal linear combination
+            row_ind, col_ind = linear_sum_assignment(distance_matrix)
+          
+            # Obtains assignment matrix (binary)
+            phi[sample, row_ind, col_ind] = 1
+
+        return phi
     
     def get_beta(self, t):
         """ 
@@ -303,21 +311,7 @@ class CAPT:
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
                 t = index * 0.1
-                complete_trajectory[sample, index, :, :] = (self.compute_trajectory(sample, t))
-                
-                if (plot and sample == self.n_samples - 1):
-                    plt.scatter(complete_trajectory[sample, index, :, 0], 
-                                complete_trajectory[sample, index, :, 1], 
-                                marker='.', 
-                                color='k',
-                                label='')
-          
-        if (plot):    
-            plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
-                            label="goal", marker='x', color='r')
-            plt.grid()    
-            plt.title('Trajectories')
-            plt.legend()
+                complete_trajectory[sample, index, :, :] = self.compute_trajectory(sample, t)
         
         return complete_trajectory
     
@@ -440,11 +434,40 @@ class CAPT:
                     
         return pos
 
-                
-capt = CAPT(50, 6, 2, 3, max_vel = 5, t_f = 12, max_accel = 10)
 
-X_t = capt.capt_trajectory()[0]
-traj = capt.simulated_trajectory()[0]
+np.random.seed(42)
+sample = 0
+
+import timeit
+
+start = timeit.default_timer()
+
+#Your statements here
+
+
+
+
+capt = CAPT(50, 6, 2, 400, max_vel = 5, t_f = 20, max_accel = 5)
+
+X_t = capt.capt_trajectory(plot=False)
+
+for t in range(0, 200):
+    plt.scatter(X_t[sample, t, :, 0], 
+                X_t[sample, t, :, 1], 
+                marker='.', 
+                color='k',
+                label='')
+
+plt.scatter(capt.G[sample, :, 0], capt.G[sample, :, 1], 
+                label="goal", marker='x', color='r')
+plt.grid()    
+plt.title('Trajectories')
+plt.legend()
+
+stop = timeit.default_timer()
+
+print('Time: ', stop - start) 
+
 
 
 
