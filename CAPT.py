@@ -50,8 +50,12 @@ class CAPT:
             self.t_f = 10 / max_vel
         else:
             self.t_f = t_f
+            
+        self.t_samples = int(self.t_f / 0.1)
         
-        self.X = self.compute_agents_initial_positions(n_agents, 
+        self.X = np.zeros((n_samples, self.t_samples, n_agents, 2))
+        
+        self.X[:, 0, :, :] = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
                                                        comm_radius,
                                                        min_dist = min_dist)
@@ -62,9 +66,9 @@ class CAPT:
         
         self.phi = self.compute_assignment_matrix(self.X, self.G)
         
-        self.trajectory = self.capt_trajectory(doPrint = True)
+        self.X = self.capt_trajectory(doPrint = True)
         
-        self.comm_graph = self.compute_communication_graph(self.trajectory,
+        self.comm_graph = self.compute_communication_graph(self.X,
                                                            comm_radius)
         
         
@@ -238,8 +242,8 @@ class CAPT:
         
         for sample in range(0, n_samples):
             # Obtains the initial posiition arrays
-            agents = self.X[sample,:,:]
-            goals = self.G[sample,:,:]
+            agents = self.X[sample, 0, :,:]
+            goals = self.G[sample, :,:]
             
             # Calculates distance matrix
             distance_matrix = cdist(agents, goals)
@@ -291,24 +295,29 @@ class CAPT:
         
         return (alpha_0 * 1 + alpha_1 * t)
 
-    def compute_trajectory(self, sample, t):
+    def compute_trajectory(self, sample, index, t_0 = 0):
         """ 
         Computes the matrix X(t) (agent location) for the input t
         
         Parameters
         ----------
-        t : double
+        index : double
             time index such that we obtain X(t)
+        t_0 : double
+            starting time index (i.e. the reference position to obtain X(t_0)),
+            we set as default 0.0
         
         Returns
         -------
         np.array (n_agents x 2)
         """
         
+        t = index * 0.1
+        
         beta = self.get_beta(t)
         phi = self.phi[sample,:,:]
         G = self.G[sample,:,:]
-        X = self.X[sample,:,:]
+        X = self.X[sample,t_0, :,:]
         N = self.n_agents
         I = np.eye(N)
         
@@ -328,8 +337,8 @@ class CAPT:
         
         Parameters
         ----------
-        plot : boolean
-            determines whether to plot the trajectory or not
+        doPrint : boolean
+            determines whether to print the progress or not
         
         Returns
         -------
@@ -348,8 +357,7 @@ class CAPT:
         
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
-                t = index * 0.1
-                complete_trajectory[sample, index, :, :] = self.compute_trajectory(sample, t)
+                complete_trajectory[sample, index, :, :] = self.compute_trajectory(sample, index)
                  
             if (doPrint):
                 percentageCount = int(100 * sample + 1) / self.n_samples
@@ -618,6 +626,7 @@ class CAPT:
         t_samples = int(self.t_f / 0.1)
         
         accel = self.compute_acceleration(clip=True)
+        
         vel = np.zeros((self.n_samples, 
                         t_samples, 
                         self.n_agents, 
@@ -628,7 +637,7 @@ class CAPT:
                         self.n_agents, 
                         2))
         
-        pos[:, 0, :, :] = self.X
+        pos = self.X
         
         for sample in range(0, self.n_samples):
             for t in np.arange(1, t_samples):
@@ -643,14 +652,13 @@ class CAPT:
    
         return pos
 
-
-
 start = timeit.default_timer()
 
 sample = 0 # sample to graph    
 
-capt = CAPT(50, 6, 2, n_samples=20, t_f = 30, max_vel = 3, max_accel = 3)
-X_t = capt.simulated_trajectory()
+capt = CAPT(n_agents = 50, comm_radius=3, min_dist=2, n_samples=400, t_f = 10, max_vel = 3, max_accel = 10)
+X_t = capt.X
+X_sample = X_t[sample]
 
 for t in range(0, X_t.shape[1]):
     plt.scatter(X_t[sample, t, :, 0], 
