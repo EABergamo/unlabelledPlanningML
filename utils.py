@@ -1,5 +1,7 @@
 from numpy import expand_dims, concatenate
 
+zeroTolerance = 1e-9
+
 def computeDifferences(u):
         
         # Takes as input a tensor of shape

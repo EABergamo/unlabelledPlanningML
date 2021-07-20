@@ -2,6 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
+import utils
+
+zeroTolerance = utils.zeroTolerance
 
 class CAPT:
     """
@@ -36,7 +39,17 @@ class CAPT:
         self.n_goals = n_agents
         self.n_samples = n_samples
         self.max_accel = max_accel
-    
+        
+        if (max_vel is None):
+            self.max_vel = 10
+        else:
+            self.max_vel = max_vel
+        
+        if (t_f is None):
+            self.t_f = 10 / max_vel
+        else:
+            self.t_f = t_f
+        
         self.X = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
                                                        comm_radius,
@@ -48,15 +61,12 @@ class CAPT:
         
         self.phi = self.compute_assignment_matrix(self.X, self.G)
         
-        if (max_vel is None):
-            self.max_vel = 10
-        else:
-            self.max_vel = max_vel
+        self.trajectory = self.capt_trajectory(doPrint = True)
         
-        if (t_f is None):
-            self.t_f = 10 / max_vel
-        else:
-            self.t_f = t_f
+        self.comm_graph = self.compute_communication_graph(self.trajectory,
+                                                           comm_radius)
+        
+        
          
         # Unclear if required?    
         # self.Phi = np.kron(self.phi, np.eye(self.n_goals)) 
@@ -358,6 +368,171 @@ class CAPT:
             
         return complete_trajectory
     
+    def compute_communication_graph(self, pos, comm_radius, 
+                                    normalize_graph = True,
+                                    doPrint = True):
+        
+        
+        pos = np.transpose(pos, (0, 1, 3, 2))   
+        
+        maxBatchSize = 100
+        maxTimeSamples = 200
+        kernelScale = 1
+        
+        assert comm_radius > 0
+        assert len(pos.shape) == 4
+        n_samples = pos.shape[0]
+        tSamples = pos.shape[1]
+        assert pos.shape[2] == 2
+        nAgents = pos.shape[3]
+        
+        # Compute the number of samples, and split the indices accordingly
+        if n_samples < maxBatchSize:
+            nBatches = 1
+            batchSize = [n_samples]
+        elif n_samples % maxBatchSize != 0:
+            # If we know it's not divisible, then we do floor division and
+            # add one more batch
+            nBatches = n_samples // maxBatchSize + 1
+            batchSize = [maxBatchSize] * nBatches
+            # But the last batch is actually smaller, so just add the 
+            # remaining ones
+            batchSize[-1] = n_samples - sum(batchSize[0:-1])
+        # If they fit evenly, then just do so.
+        else:
+            nBatches = int(n_samples/maxBatchSize)
+            batchSize = [maxBatchSize] * nBatches
+        # batchIndex is used to determine the first and last element of each
+        # batch. We need to add the 0 because it's the first index.
+        batchIndex = np.cumsum(batchSize).tolist()
+        batchIndex = [0] + batchIndex
+        
+        # Create the output state variable
+        graphMatrix = np.zeros((n_samples, tSamples, nAgents, nAgents))
+        
+        for b in range(nBatches):
+            
+            # Pick the batch elements
+            posBatch = pos[batchIndex[b]:batchIndex[b+1]]
+                
+            if tSamples > maxTimeSamples:
+                # If the trajectories are longer than 200 points, then do it 
+                # time by time.
+                
+                # For each time instant
+                for t in range(tSamples):
+                    
+                    # Let's start by computing the distance squared
+                    _, distSq = utils.computeDifferences(posBatch[:,t,:,:])
+                    # Apply the Kernel
+                    graphMatrixTime = np.exp(-kernelScale * distSq)
+                  
+                    # Now let's place zeros in all places whose distance is greater
+                    # than the radius
+                    graphMatrixTime[distSq > (comm_radius ** 2)] = 0.
+                    # Set the diagonal elements to zero
+                    graphMatrixTime[:,\
+                                    np.arange(0,nAgents),np.arange(0,nAgents)]\
+                                                                           = 0.
+                    # If it is unweighted, force all nonzero values to be 1
+                    graphMatrixTime = (graphMatrixTime > zeroTolerance)\
+                                                          .astype(distSq.dtype)
+                                                              
+                    if normalize_graph:
+                        isSymmetric = np.allclose(graphMatrixTime,
+                                                  np.transpose(graphMatrixTime,
+                                                               axes = [0,2,1]))
+                        # Tries to make the computation faster, only the 
+                        # eigenvalues (while there is a cost involved in 
+                        # computing whether the matrix is symmetric, 
+                        # experiments found that it is still faster to use the
+                        # symmetric algorithm for the eigenvalues)
+                        if isSymmetric:
+                            W = np.linalg.eigvalsh(graphMatrixTime)
+                        else:
+                            W = np.linalg.eigvals(graphMatrixTime)
+                        maxEigenvalue = np.max(np.real(W), axis = 1)
+                        #   batchSize[b]
+                        # Reshape to be able to divide by the graph matrix
+                        maxEigenvalue=maxEigenvalue.reshape((batchSize[b],1,1))
+                        # Normalize
+                        graphMatrixTime = graphMatrixTime / maxEigenvalue
+                                                              
+                    # And put it in the corresponding time instant
+                    graphMatrix[batchIndex[b]:batchIndex[b+1],t,:,:] = \
+                                                                graphMatrixTime
+                    
+                    if doPrint:
+                        # Sample percentage count
+                        percentageCount = int(100*(t+1+b*tSamples)\
+                                                          /(nBatches*tSamples))
+                        
+                        if t == 0 and b == 0:
+                            # It's the first one, so just print it
+                            print("%3d%%" % percentageCount,
+                                  end = '', flush = True)
+                        else:
+                            # Erase the previous characters
+                            print('\b \b' * 4 + "%3d%%" % percentageCount,
+                                  end = '', flush = True)
+                
+            else:
+                # Let's start by computing the distance squared
+                _, distSq = utils.computeDifferences(posBatch)
+                # Apply the Kernel
+                graphMatrixBatch = np.exp(-kernelScale * distSq)
+                # Now let's place zeros in all places whose distance is greater
+                # than the radius
+                graphMatrixBatch[distSq > (comm_radius ** 2)] = 0.
+                # Set the diagonal elements to zero
+                graphMatrixBatch[:,:,
+                                 np.arange(0,nAgents),np.arange(0,nAgents)] =0.
+                # If it is unweighted, force all nonzero values to be 1
+                graphMatrixBatch = (graphMatrixBatch > zeroTolerance)\
+                                                          .astype(distSq.dtype)
+                    
+                if normalize_graph:
+                    isSymmetric = np.allclose(graphMatrixBatch,
+                                              np.transpose(graphMatrixBatch,
+                                                            axes = [0,1,3,2]))
+                    # Tries to make the computation faster
+                    if isSymmetric:
+                        W = np.linalg.eigvalsh(graphMatrixBatch)
+                    else:
+                        W = np.linalg.eigvals(graphMatrixBatch)
+                    maxEigenvalue = np.max(np.real(W), axis = 2)
+                    #   batchSize[b] x tSamples
+                    # Reshape to be able to divide by the graph matrix
+                    maxEigenvalue = maxEigenvalue.reshape((batchSize[b],
+                                                           tSamples,
+                                                           1, 1))
+                    # Normalize
+                    graphMatrixBatch = graphMatrixBatch / maxEigenvalue
+                    
+                # Store
+                graphMatrix[batchIndex[b]:batchIndex[b+1]] = graphMatrixBatch
+                
+                if doPrint:
+                    # Sample percentage count
+                    percentageCount = int(100*(b+1)/nBatches)
+                    
+                    if b == 0:
+                        # It's the first one, so just print it
+                        print("%3d%%" % percentageCount,
+                              end = '', flush = True)
+                    else:
+                        # Erase the previous characters
+                        print('\b \b' * 4 + "%3d%%" % percentageCount,
+                              end = '', flush = True)
+                    
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            
+        return graphMatrix
+        
+    
     def compute_velocity(self):
         """ 
         Computes the matrix with the velocity (v_x, v_y) of each agent for all t such
@@ -462,7 +637,7 @@ class CAPT:
                     + vel[sample, t - 1, :, :] * 0.1 \
                     + accel[sample, t, :, :] * 0.1**2 / 2
                     
-                    
+   
         return pos
 
 
@@ -473,9 +648,9 @@ import timeit
 
 start = timeit.default_timer()
 
-capt = CAPT(50, 6, 2, 400, max_vel = 5, t_f = 20, max_accel = 5)
+capt = CAPT(50, 6, 2, n_samples=100, max_vel = 5, t_f = 20, max_accel = 5)
 
-X_t = capt.capt_trajectory()
+X_t = capt.trajectory
 
 for t in range(0, 200):
     plt.scatter(X_t[sample, t, :, 0], 
@@ -495,6 +670,7 @@ stop = timeit.default_timer()
 print()
 print('\tTotal time: ', stop - start, 's') 
 
+graph = capt.comm_graph[0]
 
 
 
