@@ -442,11 +442,6 @@ import timeit
 
 start = timeit.default_timer()
 
-#Your statements here
-
-
-
-
 capt = CAPT(50, 6, 2, 400, max_vel = 5, t_f = 20, max_accel = 5)
 
 X_t = capt.capt_trajectory(plot=False)
