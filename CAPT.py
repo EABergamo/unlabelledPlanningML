@@ -46,8 +46,7 @@ class CAPT:
                                                       n_samples,
                                                       min_dist)
         
-        self.phi = self.compute_assignment_matrix(self.X, 
-                                                                 self.G)
+        self.phi = self.compute_assignment_matrix(self.X, self.G)
         
         if (max_vel is None):
             self.max_vel = 10
@@ -58,11 +57,12 @@ class CAPT:
             self.t_f = 10 / max_vel
         else:
             self.t_f = t_f
-              
-        self.Phi = np.kron(self.phi, np.eye(self.n_goals)) # TODO: required?
+         
+        # Unclear if required?    
+        # self.Phi = np.kron(self.phi, np.eye(self.n_goals)) 
     
     def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
-                                        min_dist = 0.1, **kwargs):
+                                        min_dist = 0.1, doPrint= True, **kwargs):
         """ 
         Generates a NumPy array with the 
         initial x, y position for each of the n_agents
@@ -82,6 +82,9 @@ class CAPT:
         -------
         np.array (n_samples x n_agents x 2) 
         """
+        
+        if (doPrint):
+            print('\tComputing initial positions matrix...', end = ' ', flush = True)
         
         assert min_dist * (1.+self.zeroTolerance) <= comm_radius * (1.-self.zeroTolerance)
         
@@ -130,6 +133,9 @@ class CAPT:
                                         size = (n_samples, n_agents,  2))
         # Initial positions
         initPos = fixedPos + perturbPos
+        
+        if doPrint:
+            print("OK", flush = True)
               
         return initPos
     
@@ -199,7 +205,7 @@ class CAPT:
         plt.legend()
         plt.show()
     
-    def compute_assignment_matrix(self, X, G):
+    def compute_assignment_matrix(self, X, G, doPrint = True):
         """ 
         Computes assignment matrix using the Hungarian Algorithm
         
@@ -216,6 +222,8 @@ class CAPT:
         n_samples = self.n_samples
         phi = np.zeros((n_samples, self.n_agents, self.n_agents))
 
+        if (doPrint):
+            print('\tComputing assignment matrix...', end = ' ', flush = True)
         
         for sample in range(0, n_samples):
             # Obtains the initial posiition arrays
@@ -230,6 +238,22 @@ class CAPT:
           
             # Obtains assignment matrix (binary)
             phi[sample, row_ind, col_ind] = 1
+        
+            if (doPrint):
+                percentageCount = int(100 * sample + 1) / self.n_samples
+                if sample == 0:
+                    # It's the first one, so just print it
+                    print("%3d%%" % percentageCount,
+                          end = '', flush = True)
+                else:
+                    # Erase the previous characters
+                    print('\b \b' * 4 + "%3d%%" % percentageCount,
+                          end = '', flush = True)
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
 
         return phi
     
@@ -282,7 +306,7 @@ class CAPT:
 
         return trajectory
     
-    def capt_trajectory(self, plot=False):
+    def capt_trajectory(self, doPrint=True):
         """ 
         Computes the matrix X(t) (agent location) for all t such
         that t_0 <= t <= t_f and optionally plots it. It will use the CAPT
@@ -308,11 +332,30 @@ class CAPT:
                                         self.n_agents, 
                                         2))
         
+        if (doPrint):
+            print('\tComputing trajectories...', end = ' ', flush = True)
+        
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
                 t = index * 0.1
                 complete_trajectory[sample, index, :, :] = self.compute_trajectory(sample, t)
-        
+                 
+            if (doPrint):
+                percentageCount = int(100 * sample + 1) / self.n_samples
+                if sample == 0:
+                    # It's the first one, so just print it
+                    print("%3d%%" % percentageCount,
+                          end = '', flush = True)
+                else:
+                    # Erase the previous characters
+                    print('\b \b' * 4 + "%3d%%" % percentageCount,
+                          end = '', flush = True)
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
+            
         return complete_trajectory
     
     def compute_velocity(self):
@@ -378,7 +421,7 @@ class CAPT:
         
         return accel
     
-    def simulated_trajectory(self, plot=True):
+    def simulated_trajectory(self, doPrint = True):
         """ 
         Calculates trajectory using the calculated acceleration. This function
         is particularly useful when clip is set to True in 
@@ -401,6 +444,7 @@ class CAPT:
                         t_samples, 
                         self.n_agents, 
                         2))
+        
         pos = np.zeros((self.n_samples, 
                         t_samples, 
                         self.n_agents, 
@@ -417,20 +461,7 @@ class CAPT:
                 pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
                     + vel[sample, t - 1, :, :] * 0.1 \
                     + accel[sample, t, :, :] * 0.1**2 / 2
-                
-                if (plot and sample == self.n_samples - 1):
-                    plt.scatter(pos[sample, t, :, 0], 
-                            pos[sample, t, :, 1], 
-                            marker='.', 
-                            color='k',
-                            label='')
-          
-        if (plot):    
-            plt.scatter(self.G[0, :, 0], self.G[0, :, 1], 
-                            label="goal", marker='x', color='r')
-            plt.grid()    
-            plt.title('Trajectories (simulated)')
-            plt.legend()
+                    
                     
         return pos
 
@@ -444,7 +475,7 @@ start = timeit.default_timer()
 
 capt = CAPT(50, 6, 2, 400, max_vel = 5, t_f = 20, max_accel = 5)
 
-X_t = capt.capt_trajectory(plot=False)
+X_t = capt.capt_trajectory()
 
 for t in range(0, 200):
     plt.scatter(X_t[sample, t, :, 0], 
@@ -461,7 +492,8 @@ plt.legend()
 
 stop = timeit.default_timer()
 
-print('Time: ', stop - start) 
+print()
+print('\tTotal time: ', stop - start, 's') 
 
 
 
