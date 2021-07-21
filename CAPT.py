@@ -654,7 +654,7 @@ class CAPT:
                     vel[sample, t-1:, :, :] = new_vel
                     
                 vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
-                         + accel[sample, t, :, :] * 0.1 
+                         + accel[sample, t-1, :, :] * 0.1 
                 pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
                     + vel[sample, t - 1, :, :] * 0.1 \
                     + accel[sample, t - 1, :, :] * 0.1**2 / 2
@@ -665,7 +665,7 @@ start = timeit.default_timer()
 
 sample = 0 # sample to graph    
 
-np.random.seed(55)
+#np.random.seed(55)
 
 
 capt = CAPT(n_agents = 5, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 5)
