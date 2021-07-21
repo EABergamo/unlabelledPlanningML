@@ -585,6 +585,42 @@ class CAPT:
             print("OK", flush = True)
             
         return pos, vel, accel
+    
+    def compute_state(self):
+        
+        d = 2 * self.degree + 1
+        state = np.zeros((self.n_samples, self.t_samples, d, 2))
+        
+        # Finding closest goals
+        for sample in range(0, self.n_samples):
+                for t in range(0, self.t_samples):
+                    X = self.X
+                    agents = self.X[sample, t, :,:]
+                    goals = self.G[sample, :,:]
+                    
+                    # Calculates distance matrix
+                    distance_matrix = cdist(agents, goals)
+                    
+                    for agent in range(0, self.n_agents):
+                        distance_to_goals = distance_matrix[agent, :]
+                        closest_goals_index = np.argpartition(distance_to_goals, self.degree)[0:self.degree]
+                        
+                        goals_closest = goals[closest_goals_index]
+                                                
+                        # TODO: relative or absolute position?
+                        # distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
+                        
+                        state[sample, t, -self.degree:, :] = goals[closest_goals_index]
+                        
+        
+        return state
+
+                    
+                    
+                
+                
+                
+        
         
 
 start = timeit.default_timer()
@@ -592,7 +628,7 @@ print('Starting...')
 
 sample = 0 # sample to graph    
 
-capt = CAPT(n_agents = 30, comm_radius=6, min_dist=2, n_samples=10, t_f = 10, max_accel = 10, degree = 3)
+capt = CAPT(n_agents = 30, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 10, degree = 3)
 
 pos, vel, accel = capt.simulated_trajectory()
 
@@ -623,8 +659,7 @@ stop = timeit.default_timer()
 
 accel = capt.compute_acceleration()[0]
 
-graph = capt.comm_graph[0]
-
+a = capt.compute_state()[0]
 print()
 print('Total time: ', stop - start, 's')
 
