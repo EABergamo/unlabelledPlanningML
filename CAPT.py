@@ -5,6 +5,7 @@ from scipy.optimize import linear_sum_assignment
 import utils
 import timeit
 
+
 zeroTolerance = utils.zeroTolerance
 
 class CAPT:
@@ -50,8 +51,12 @@ class CAPT:
             self.t_f = 10 / max_vel
         else:
             self.t_f = t_f
+            
+        self.t_samples = int(self.t_f / 0.1)
         
-        self.X = self.compute_agents_initial_positions(n_agents, 
+        self.X = np.zeros((n_samples, self.t_samples, n_agents, 2))
+        
+        self.X[:, 0, :, :] = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
                                                        comm_radius,
                                                        min_dist = min_dist)
@@ -62,9 +67,9 @@ class CAPT:
         
         self.phi = self.compute_assignment_matrix(self.X, self.G)
         
-        self.trajectory = self.capt_trajectory(doPrint = True)
+        self.X = self.capt_trajectory(doPrint = True)
         
-        self.comm_graph = self.compute_communication_graph(self.trajectory,
+        self.comm_graph = self.compute_communication_graph(self.X,
                                                            comm_radius)
         
         
@@ -172,10 +177,10 @@ class CAPT:
         """
         
         # Find max/min positions
-        x_min = np.min(self.X[0, :, 0]) - 5
-        y_min = np.min(self.X[0, :, 1]) - 5
-        x_max = np.max(self.X[0, :, 0]) + 5
-        y_max = np.max(self.X[0, :, 1]) + 5
+        x_min = np.min(self.X[0, 0, :, 0]) - 5
+        y_min = np.min(self.X[0,0, :, 1]) - 5
+        x_max = np.max(self.X[0, 0,:, 0]) + 5
+        y_max = np.max(self.X[0, 0,:, 1]) + 5
       
         # Samples uniform distribution
         x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
@@ -238,8 +243,8 @@ class CAPT:
         
         for sample in range(0, n_samples):
             # Obtains the initial posiition arrays
-            agents = self.X[sample,:,:]
-            goals = self.G[sample,:,:]
+            agents = self.X[sample, 0, :,:]
+            goals = self.G[sample, :,:]
             
             # Calculates distance matrix
             distance_matrix = cdist(agents, goals)
@@ -268,7 +273,7 @@ class CAPT:
 
         return phi
     
-    def get_beta(self, t):
+    def get_beta(self, t_0, t):
         """ 
         Computes the polynomial function of time Beta as described in
         the CAPT paper.
@@ -283,7 +288,6 @@ class CAPT:
         double (β(t))
         """
         
-        t_0 = 0
         t_f = self.t_f
         
         alpha_0 = -t_0 / (t_f - t_0)
@@ -291,33 +295,42 @@ class CAPT:
         
         return (alpha_0 * 1 + alpha_1 * t)
 
-    def compute_trajectory(self, sample, t):
+    def compute_trajectory(self, sample, index, t_0 = 0):
         """ 
         Computes the matrix X(t) (agent location) for the input t
         
         Parameters
         ----------
-        t : double
+        index : double
             time index such that we obtain X(t)
+        t_0 : double
+            starting time index (i.e. the reference position to obtain X(t_0)),
+            we set as default 0.0
         
         Returns
         -------
         np.array (n_agents x 2)
         """
         
-        beta = self.get_beta(t)
+        t_0 = int(t_0 * 0.1)
+        t = index * 0.1
+        
+        beta = self.get_beta(t_0, t)
         phi = self.phi[sample,:,:]
         G = self.G[sample,:,:]
-        X = self.X[sample,:,:]
+        X = self.X[sample,t_0*10, :,:]
+        
+        
         N = self.n_agents
         I = np.eye(N)
-        
+
         trajectory = (1 - beta) * X \
             + beta * (phi @ G + (I - phi @ phi.T) @ X)
+            
 
         return trajectory
     
-    def capt_trajectory(self, doPrint=True):
+    def capt_trajectory(self, doPrint=True, t_0 = 0):
         """ 
         Computes the matrix X(t) (agent location) for all t such
         that t_0 <= t <= t_f and optionally plots it. It will use the CAPT
@@ -328,28 +341,29 @@ class CAPT:
         
         Parameters
         ----------
-        plot : boolean
-            determines whether to plot the trajectory or not
+        doPrint : boolean
+            determines whether to print the progress or not
         
         Returns
         -------
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        t_samples = int(self.t_f / 0.1)
+        t_samples = int((self.t_f - t_0 * 0.1) / 0.1)
         
         complete_trajectory = np.zeros((self.n_samples, 
                                         t_samples, 
                                         self.n_agents, 
                                         2))
         
+        
         if (doPrint):
-            print('\tComputing trajectories...', end = ' ', flush = True)
+            print('\tComputing CAPT trajectories...', end = ' ', flush = True)
         
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
-                t = index * 0.1
-                complete_trajectory[sample, index, :, :] = self.compute_trajectory(sample, t)
+                complete_trajectory[sample, index, :, :] = \
+                    self.compute_trajectory(sample, index, t_0)
                  
             if (doPrint):
                 percentageCount = int(100 * sample + 1) / self.n_samples
@@ -372,6 +386,31 @@ class CAPT:
     def compute_communication_graph(self, pos, comm_radius, 
                                     normalize_graph = True,
                                     doPrint = True):
+        """ 
+        Computes the communication graphs S for the entire position array at
+        each time instant. Note that since this function was originally part
+        of the Alelab GNN library, the position input has shape
+        n_samples x t_samples x 2 x n_agents. It must, therefore, be reshaped
+        before being used as an input.
+        
+        Parameters
+        ----------
+        pos : np.array (n_samples x t_samples x 2 x n_agents)
+            position array for the agents
+        comm_radius : double
+            communication radius
+        normalize_graph : boolean
+            whether to normalize all elements by the largest eigenvalue
+        doPrint : boolean
+            whether to print progress or not.
+            
+            
+        
+        Returns
+        -------
+        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        
+        """
         
         if (doPrint):
             print('\tComputing communication graph...', end = ' ', flush = True)
@@ -489,6 +528,7 @@ class CAPT:
                 # Set the diagonal elements to zero
                 graphMatrixBatch[:,:,
                                  np.arange(0,nAgents),np.arange(0,nAgents)] =0.
+                                 
                 # If it is unweighted, force all nonzero values to be 1
                 graphMatrixBatch = (graphMatrixBatch > zeroTolerance)\
                                                           .astype(distSq.dtype)
@@ -536,7 +576,7 @@ class CAPT:
         return graphMatrix
         
     
-    def compute_velocity(self):
+    def compute_velocity(self, doPrint = True, t_0 = 0):
         """ 
         Computes the matrix with the velocity (v_x, v_y) of each agent for all t such
         that t_0 <= t <= t_f.
@@ -550,7 +590,7 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        complete_trajectory = self.capt_trajectory()
+        complete_trajectory = self.capt_trajectory(doPrint=False, t_0 = t_0)
         
         # Calculate the difference at each step
         v_x = np.diff(complete_trajectory[:,:,:,0], axis=1) / 0.1
@@ -560,12 +600,12 @@ class CAPT:
         vel = np.stack((v_x, v_y), axis=-1)
         
         # Add velocity for t = 0
-        v_0 = np.zeros((self.n_samples, 1, 50, 2))
+        v_0 = np.zeros((self.n_samples, 1, self.n_agents, 2))
         vel = np.concatenate((v_0, vel), axis=1)
         
         return vel
     
-    def compute_acceleration(self, clip=True):
+    def compute_acceleration(self, clip=True, t_0 = 0):
         """ 
         Computes the matrix with the acceleration (a_x, a_y) of each agent for 
         all t such that t_0 <= t <= t_f.
@@ -581,7 +621,7 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        complete_velocity = self.compute_velocity()
+        complete_velocity = self.compute_velocity(t_0 = t_0)
         
         # Calculate the difference at each step
         a_x = np.diff(complete_velocity[:,:,:,0], axis=1) / 0.1
@@ -617,7 +657,8 @@ class CAPT:
         """
         t_samples = int(self.t_f / 0.1)
         
-        accel = self.compute_acceleration(clip=True)
+        accel = self.compute_acceleration(clip=True, t_0 = 0)
+        
         vel = np.zeros((self.n_samples, 
                         t_samples, 
                         self.n_agents, 
@@ -628,50 +669,83 @@ class CAPT:
                         self.n_agents, 
                         2))
         
-        pos[:, 0, :, :] = self.X
+        pos = self.X
+        
+        if (doPrint):
+            print('\tComputing simulated trajectories...', end = ' ', flush = True)
         
         for sample in range(0, self.n_samples):
             for t in np.arange(1, t_samples):
-                
-                vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
-                    + accel[sample, t, :, :] * 0.1
+        
+                if (t % 25 == 0):
+                    new_vel = self.compute_velocity(t_0 = t)[sample, 1, :, :]
+                   
+                    new_accel = (new_vel - vel[sample, t-1, :, :]) / 0.1
                     
+                    accel[sample, t-1, :, :] = np.clip(new_accel, -self.max_accel, self.max_accel)
+                    
+                vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
+                         + accel[sample, t-1, :, :] * 0.1 
+                         
                 pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
                     + vel[sample, t - 1, :, :] * 0.1 \
-                    + accel[sample, t, :, :] * 0.1**2 / 2
+                    + accel[sample, t - 1, :, :] * 0.1**2 / 2
                     
-   
-        return pos
-
-
+            if (doPrint):
+                percentageCount = int(100 * sample + 1) / self.n_samples
+                if sample == 0:
+                    # It's the first one, so just print it
+                    print("%3d%%" % percentageCount,
+                          end = '', flush = True)
+                else:
+                    # Erase the previous characters
+                    print('\b \b' * 4 + "%3d%%" % percentageCount,
+                          end = '', flush = True)
+            
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
+            
+        return pos, vel, accel
 
 start = timeit.default_timer()
+print('Starting...')
 
 sample = 0 # sample to graph    
 
-capt = CAPT(50, 6, 2, n_samples=20, t_f = 30, max_vel = 3, max_accel = 3)
-X_t = capt.simulated_trajectory()
+capt = CAPT(n_agents = 20, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 5)
 
-for t in range(0, X_t.shape[1]):
-    plt.scatter(X_t[sample, t, :, 0], 
-                X_t[sample, t, :, 1], 
+pos, vel, accel = capt.simulated_trajectory()
+
+for t in range(0, pos.shape[1]):
+    plt.scatter(pos[sample, t, :, 0], 
+                pos[sample, t, :, 1], 
                 marker='.', 
-                color='k',
+                color='gray',
                 label='')
 
 plt.scatter(capt.G[sample, :, 0], capt.G[sample, :, 1], 
                 label="goal", marker='x', color='r')
+
+plt.scatter(pos[sample, 0, :, 0], 
+            pos[sample, 0, :, 1], 
+            marker=',', 
+            color='red',
+            label='')
+
 plt.grid()    
 plt.title('Trajectories')
 plt.legend()
-
-a = capt.compute_acceleration()[0]
-
-
+#plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
 stop = timeit.default_timer()
 
+accel = capt.compute_acceleration()[0]
+
 print()
-print('\tTotal time: ', stop - start, 's')
+print('Total time: ', stop - start, 's')
+
 
 
 
