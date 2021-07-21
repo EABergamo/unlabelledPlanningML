@@ -288,7 +288,6 @@ class CAPT:
         double (β(t))
         """
         
-        t_0 = 0
         t_f = self.t_f
         
         alpha_0 = -t_0 / (t_f - t_0)
@@ -313,16 +312,18 @@ class CAPT:
         np.array (n_agents x 2)
         """
         
+        t_0 = int(t_0 * 0.1)
         t = index * 0.1
         
-        beta = self.get_beta(0, t)
+        beta = self.get_beta(t_0, t)
         phi = self.phi[sample,:,:]
         G = self.G[sample,:,:]
-        X = self.X[sample,t_0, :,:]
+        X = self.X[sample,t_0*10, :,:]
+        
         
         N = self.n_agents
         I = np.eye(N)
-        
+
         trajectory = (1 - beta) * X \
             + beta * (phi @ G + (I - phi @ phi.T) @ X)
             
@@ -348,7 +349,7 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        t_samples = int(self.t_f / 0.1)
+        t_samples = int((self.t_f - t_0 * 0.1) / 0.1)
         
         complete_trajectory = np.zeros((self.n_samples, 
                                         t_samples, 
@@ -362,7 +363,7 @@ class CAPT:
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
                 complete_trajectory[sample, index, :, :] = \
-                    self.compute_trajectory(sample, index, t_0 = t_0)
+                    self.compute_trajectory(sample, index, t_0)
                  
             if (doPrint):
                 percentageCount = int(100 * sample + 1) / self.n_samples
@@ -647,35 +648,16 @@ class CAPT:
         
         for sample in range(0, self.n_samples):
             for t in np.arange(1, t_samples):
-                
-                
-                if (t == 50):
-                    # Computes new velocities based on position
-                    corrected_velocities = self.compute_velocity(doPrint = False, \
-                                                                 t_0 = t - 1)[0, 1, :, :]
+        
+                if (t % 25 == 0):
+                    new_vel = self.compute_velocity(t_0 = t)[sample, 1, :, :]
+                    vel[sample, t-1:, :, :] = new_vel
                     
-                    vel_test = vel[sample, :, :, :].copy()
-                    print()
-                    corrected_velocities = utils.rotateVector(vel[sample, t-1, :, :], corrected_velocities)
-                    vel[sample, t-1:, :, :] = corrected_velocities
-                    print('Velocities updated!')
-                else:
-                    accel = self.compute_acceleration(clip=True, t_0 = t - 1)
-                 
-                    vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
-                         + accel[sample, t, :, :] * 0.1
-                         
-                    if (t == 49):
-                        vel_test = vel[sample, :, :, :]
-                        print()
-                        pass
- 
-                    
+                vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
+                         + accel[sample, t, :, :] * 0.1 
                 pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
                     + vel[sample, t - 1, :, :] * 0.1 \
                     + accel[sample, t - 1, :, :] * 0.1**2 / 2
-                    
-                
               
         return pos
 
