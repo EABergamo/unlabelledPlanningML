@@ -358,7 +358,7 @@ class CAPT:
         
         
         if (doPrint):
-            print('\tComputing trajectories...', end = ' ', flush = True)
+            print('\tComputing CAPT trajectories...', end = ' ', flush = True)
         
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
@@ -386,6 +386,31 @@ class CAPT:
     def compute_communication_graph(self, pos, comm_radius, 
                                     normalize_graph = True,
                                     doPrint = True):
+        """ 
+        Computes the communication graphs S for the entire position array at
+        each time instant. Note that since this function was originally part
+        of the Alelab GNN library, the position input has shape
+        n_samples x t_samples x 2 x n_agents. It must, therefore, be reshaped
+        before being used as an input.
+        
+        Parameters
+        ----------
+        pos : np.array (n_samples x t_samples x 2 x n_agents)
+            position array for the agents
+        comm_radius : double
+            communication radius
+        normalize_graph : boolean
+            whether to normalize all elements by the largest eigenvalue
+        doPrint : boolean
+            whether to print progress or not.
+            
+            
+        
+        Returns
+        -------
+        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        
+        """
         
         if (doPrint):
             print('\tComputing communication graph...', end = ' ', flush = True)
@@ -646,54 +671,80 @@ class CAPT:
         
         pos = self.X
         
+        if (doPrint):
+            print('\tComputing simulated trajectories...', end = ' ', flush = True)
+        
         for sample in range(0, self.n_samples):
             for t in np.arange(1, t_samples):
         
                 if (t % 25 == 0):
                     new_vel = self.compute_velocity(t_0 = t)[sample, 1, :, :]
                    
+                    new_accel = (new_vel - vel[sample, t-1, :, :]) / 0.1
                     
-                    accel[sample, t-1, :, :] = (new_vel - vel[sample, t-1, :, :]) / 0.1
+                    accel[sample, t-1, :, :] = np.clip(new_accel, -self.max_accel, self.max_accel)
                     
                 vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
                          + accel[sample, t-1, :, :] * 0.1 
+                         
                 pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
                     + vel[sample, t - 1, :, :] * 0.1 \
                     + accel[sample, t - 1, :, :] * 0.1**2 / 2
-              
-        return pos
+                    
+            if (doPrint):
+                percentageCount = int(100 * sample + 1) / self.n_samples
+                if sample == 0:
+                    # It's the first one, so just print it
+                    print("%3d%%" % percentageCount,
+                          end = '', flush = True)
+                else:
+                    # Erase the previous characters
+                    print('\b \b' * 4 + "%3d%%" % percentageCount,
+                          end = '', flush = True)
+            
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
+            
+        return pos, vel, accel
 
 start = timeit.default_timer()
+print('Starting...')
 
 sample = 0 # sample to graph    
 
-#np.random.seed(55)
+capt = CAPT(n_agents = 20, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 5)
 
+pos, vel, accel = capt.simulated_trajectory()
 
-capt = CAPT(n_agents = 5, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 5)
-X_c = capt.compute_velocity()[0]
-X_t = capt.simulated_trajectory()
-X_sample = X_t[sample]
-
-for t in range(0, X_t.shape[1]):
-    plt.scatter(X_t[sample, t, :, 0], 
-                X_t[sample, t, :, 1], 
+for t in range(0, pos.shape[1]):
+    plt.scatter(pos[sample, t, :, 0], 
+                pos[sample, t, :, 1], 
                 marker='.', 
                 color='gray',
                 label='')
 
 plt.scatter(capt.G[sample, :, 0], capt.G[sample, :, 1], 
                 label="goal", marker='x', color='r')
+
+plt.scatter(pos[sample, 0, :, 0], 
+            pos[sample, 0, :, 1], 
+            marker=',', 
+            color='red',
+            label='')
+
 plt.grid()    
 plt.title('Trajectories')
 plt.legend()
-plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
+#plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
 stop = timeit.default_timer()
 
 accel = capt.compute_acceleration()[0]
 
 print()
-print('\tTotal time: ', stop - start, 's')
+print('Total time: ', stop - start, 's')
 
 
 
