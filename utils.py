@@ -52,11 +52,14 @@ def rotateVector(v_1, v_2):
         np.sqrt(np.sum((v_2 * v_2), axis=1))
         
         
-    cos = np.arccos(dot_product / lengths_multiplied)    
-    angles = np.arccos(dot_product / lengths_multiplied)
-    
+    cos = np.clip(dot_product / lengths_multiplied, -1, 1)
+    angles = np.arccos(cos)
+
     rotations = np.array([v_1[:,0] * np.cos(angles) - v_1[:,1] * np.sin(angles), 
                  v_1[:,0] * np.sin(angles) + v_1[:,1] * np.cos(angles)]).T
+
+    return rotations
+    
     
     return rotations
 

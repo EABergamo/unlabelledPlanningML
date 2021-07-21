@@ -315,7 +315,7 @@ class CAPT:
         
         t = index * 0.1
         
-        beta = self.get_beta(t_0, t)
+        beta = self.get_beta(0, t)
         phi = self.phi[sample,:,:]
         G = self.G[sample,:,:]
         X = self.X[sample,t_0, :,:]
@@ -550,7 +550,7 @@ class CAPT:
         return graphMatrix
         
     
-    def compute_velocity(self, t_0 = 0):
+    def compute_velocity(self, doPrint = True, t_0 = 0):
         """ 
         Computes the matrix with the velocity (v_x, v_y) of each agent for all t such
         that t_0 <= t <= t_f.
@@ -564,7 +564,7 @@ class CAPT:
         np.array (n_samples x (t_f / 0.1) x n_agents x 2)
         
         """
-        complete_trajectory = self.capt_trajectory(t_0 = t_0)
+        complete_trajectory = self.capt_trajectory(doPrint=False, t_0 = t_0)
         
         # Calculate the difference at each step
         v_x = np.diff(complete_trajectory[:,:,:,0], axis=1) / 0.1
@@ -649,23 +649,33 @@ class CAPT:
             for t in np.arange(1, t_samples):
                 
                 
-                if (t == 25):
+                if (t == 50):
                     # Computes new velocities based on position
-                    corrected_velocities = self.compute_velocity(t_0 = t)[0, 1, :, :]
+                    corrected_velocities = self.compute_velocity(doPrint = False, \
+                                                                 t_0 = t - 1)[0, 1, :, :]
                     
-                    
-                    test = utils.rotateVector(vel[sample, t-1, :, :], corrected_velocities)
+                    vel_test = vel[sample, :, :, :].copy()
                     print()
+                    corrected_velocities = utils.rotateVector(vel[sample, t-1, :, :], corrected_velocities)
+                    vel[sample, t-1:, :, :] = corrected_velocities
+                    print('Velocities updated!')
                 else:
                     accel = self.compute_acceleration(clip=True, t_0 = t - 1)
                  
                     vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
                          + accel[sample, t, :, :] * 0.1
+                         
+                    if (t == 49):
+                        vel_test = vel[sample, :, :, :]
+                        print()
+                        pass
  
                     
                 pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
                     + vel[sample, t - 1, :, :] * 0.1 \
                     + accel[sample, t - 1, :, :] * 0.1**2 / 2
+                    
+                
               
         return pos
 
@@ -675,9 +685,9 @@ sample = 0 # sample to graph
 
 np.random.seed(55)
 
-X_c = capt.compute_velocity()[0]
 
 capt = CAPT(n_agents = 5, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 5)
+X_c = capt.compute_velocity()[0]
 X_t = capt.simulated_trajectory()
 X_sample = X_t[sample]
 
@@ -700,6 +710,7 @@ accel = capt.compute_acceleration()[0]
 
 print()
 print('\tTotal time: ', stop - start, 's')
+
 
 
 
