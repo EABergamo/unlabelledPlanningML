@@ -651,7 +651,9 @@ class CAPT:
         
                 if (t % 25 == 0):
                     new_vel = self.compute_velocity(t_0 = t)[sample, 1, :, :]
-                    vel[sample, t-1:, :, :] = new_vel
+                   
+                    
+                    accel[sample, t-1, :, :] = (new_vel - vel[sample, t-1, :, :]) / 0.1
                     
                 vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
                          + accel[sample, t-1, :, :] * 0.1 
