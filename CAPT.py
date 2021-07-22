@@ -5,11 +5,180 @@ from scipy.optimize import linear_sum_assignment
 import utils
 import timeit
 from sklearn.neighbors import NearestNeighbors
-
+import torch
 
 zeroTolerance = utils.zeroTolerance
 
-class CAPT:
+class _data:
+    # Internal supraclass from which all data sets will inherit.
+    # There are certain methods that all Data classes must have:
+    #   getSamples(), expandDims(), to() and astype().
+    # To avoid coding this methods over and over again, we create a class from
+    # which the data can inherit this basic methods.
+    
+    # All the signals are always assumed to be graph signals that are written
+    #   nDataPoints (x nFeatures) x nNodes
+    # If we have one feature, we have the expandDims() that adds a x1 so that
+    # it can be readily processed by architectures/functions that always assume
+    # a 3-dimensional signal.
+    
+    def __init__(self):
+        # Minimal set of attributes that all data classes should have
+        self.dataType = None
+        self.device = None
+        self.n_train = None
+        self.n_valid = None
+        self.n_test = None
+        self.samples = {}
+        self.samples['train'] = {}
+        self.samples['train']['signals'] = None
+        self.samples['train']['targets'] = None
+        self.samples['valid'] = {}
+        self.samples['valid']['signals'] = None
+        self.samples['valid']['targets'] = None
+        self.samples['test'] = {}
+        self.samples['test']['signals'] = None
+        self.samples['test']['targets'] = None
+        
+    def getSamples(self, samplesType, *args):
+        # samplesType: train, valid, test
+        # args: 0 args, give back all
+        # args: 1 arg: if int, give that number of samples, chosen at random
+        # args: 1 arg: if list, give those samples precisely.
+        # Check that the type is one of the possible ones
+        assert samplesType == 'train' or samplesType == 'valid' \
+                    or samplesType == 'test'
+        # Check that the number of extra arguments fits
+        assert len(args) <= 1
+        # If there are no arguments, just return all the desired samples
+        x = self.samples[samplesType]['signals']
+        y = self.samples[samplesType]['targets']
+        # If there's an argument, we have to check whether it is an int or a
+        # list
+        if len(args) == 1:
+            # If it is an int, just return that number of randomly chosen
+            # samples.
+            if type(args[0]) == int:
+                nSamples = x.shape[0] # total number of samples
+                # We can't return more samples than there are available
+                assert args[0] <= nSamples
+                # Randomly choose args[0] indices
+                selectedIndices = np.random.choice(nSamples, size = args[0],
+                                                   replace = False)
+                # Select the corresponding samples
+                xSelected = x[selectedIndices]
+                y = y[selectedIndices]
+            else:
+                # The fact that we put else here instead of elif type()==list
+                # allows for np.array to be used as indices as well. In general,
+                # any variable with the ability to index.
+                xSelected = x[args[0]]
+                # And assign the labels
+                y = y[args[0]]
+                
+            # If we only selected a single element, then the nDataPoints dim
+            # has been left out. So if we have less dimensions, we have to
+            # put it back
+            if len(xSelected.shape) < len(x.shape):
+                if 'torch' in self.dataType:
+                    x = xSelected.unsqueeze(0)
+                else:
+                    x = np.expand_dims(xSelected, axis = 0)
+            else:
+                x = xSelected
+
+        return x, y
+    
+    def expandDims(self):
+        
+        # For each data set partition
+        for key in self.samples.keys():
+            # If there's something in them
+            if self.samples[key]['signals'] is not None:
+                # And if it has only two dimensions
+                #   (shape: nDataPoints x nNodes)
+                if len(self.samples[key]['signals'].shape) == 2:
+                    # Then add a third dimension in between so that it ends
+                    # up with shape
+                    #   nDataPoints x 1 x nNodes
+                    # and it respects the 3-dimensional format that is taken
+                    # by many of the processing functions
+                    if 'torch' in repr(self.dataType):
+                        self.samples[key]['signals'] = \
+                                       self.samples[key]['signals'].unsqueeze(1)
+                    else:
+                        self.samples[key]['signals'] = np.expand_dims(
+                                                   self.samples[key]['signals'],
+                                                   axis = 1)
+                elif len(self.samples[key]['signals'].shape) == 3:
+                    if 'torch' in repr(self.dataType):
+                        self.samples[key]['signals'] = \
+                                       self.samples[key]['signals'].unsqueeze(2)
+                    else:
+                        self.samples[key]['signals'] = np.expand_dims(
+                                                   self.samples[key]['signals'],
+                                                   axis = 2)
+        
+    def astype(self, dataType):
+        # This changes the type for the minimal attributes (samples). This 
+        # methods should still be initialized within the data classes, if more
+        # attributes are used.
+        
+        # The labels could be integers as created from the dataset, so if they
+        # are, we need to be sure they are integers also after conversion. 
+        # To do this we need to match the desired dataType to its int 
+        # counterpart. Typical examples are:
+        #   numpy.float64 -> numpy.int64
+        #   numpy.float32 -> numpy.int32
+        #   torch.float64 -> torch.int64
+        #   torch.float32 -> torch.int32
+        
+        targetType = str(self.samples['train']['targets'].dtype)
+        if 'int' in targetType:
+            if 'numpy' in repr(dataType):
+                if '64' in targetType:
+                    targetType = np.int64
+                elif '32' in targetType:
+                    targetType = np.int32
+            elif 'torch' in repr(dataType):
+                if '64' in targetType:
+                    targetType = torch.int64
+                elif '32' in targetType:
+                    targetType = torch.int32
+        else: # If there is no int, just stick with the given dataType
+            targetType = dataType
+        
+        # Now that we have selected the dataType, and the corresponding
+        # labelType, we can proceed to convert the data into the corresponding
+        # type
+        for key in self.samples.keys():
+            self.samples[key]['signals'] = utils.changeDataType(
+                                                   self.samples[key]['signals'],
+                                                   dataType)
+            self.samples[key]['targets'] = utils.changeDataType(
+                                                   self.samples[key]['targets'],
+                                                   targetType)
+
+        # Update attribute
+        if dataType is not self.dataType:
+            self.dataType = dataType
+
+    def to(self, device):
+        # This changes the type for the minimal attributes (samples). This 
+        # methods should still be initialized within the data classes, if more
+        # attributes are used.
+        # This can only be done if they are torch tensors
+        if 'torch' in repr(self.dataType):
+            for key in self.samples.keys():
+                for secondKey in self.samples[key].keys():
+                    self.samples[key][secondKey] \
+                                      = self.samples[key][secondKey].to(device)
+
+            # If the device changed, save it.
+            if device is not self.device:
+                self.device = device
+
+class CAPT(_data):
     """
     A wrapper class to execute the CAPT algorithm by Matthew Turpin
     (https://journals.sagepub.com/doi/10.1177/0278364913515307). Certain 
@@ -20,65 +189,133 @@ class CAPT:
     Attributes
     ----------
     n_agents : int
-              The total number of agents that will take part in the simulation
+        The total number of agents that will take part in the simulation
+    min_dist : double
+        The minimum distanc between agents
     n_samples : int
         The total number of samples.
-    comm_radius : double
-        The communication radius between agents (determines initial spacing between agents)
-    min_dist : double
-        The minimum distance between each agent
-    
-    Methods
-    -------
-    computeInitialPositions : np.array (n_samples x 2 x n_agents)
+    max_vel = double
+        Maximum velocity allowed
+    t_f = double
+        Simulation time
+    max_accel : double
+        Maximum acceleration allowed
+    degree : int
+        Number of edges (connections) per node
     """
 
-    def __init__(self, n_agents, comm_radius, min_dist, n_samples, 
+    def __init__(self, n_agents, min_dist,
+                 n_train, n_valid, n_test,
                  max_vel = None, t_f=None, max_accel = 5, degree = 5):
-        self.zeroTolerance = 1e-7
-        self.n_agents = n_agents
-        self.comm_radius = comm_radius
-        self.min_dist = min_dist
-        self.n_goals = n_agents
-        self.n_samples = n_samples
-        self.max_accel = max_accel
-        self.degree = degree
+
+        super().__init__()
         
+        self.zeroTolerance = 1e-7 # all values less then this are zero
+        self.n_agents = n_agents # number of agents
+        self.min_dist = min_dist # minimum initial distance between agents 
+        self.n_goals = n_agents # number of goals (same as n_agents by design)
+        self.max_accel = max_accel # max allowed acceleration
+        self.degree = degree # number of edges for each node (agent)
+
+        # Dataset information
+        self.n_train, self.n_valid, self.n_test =  n_train, n_valid, n_test
+        self.n_samples = n_train + n_valid + n_test # number of samples
+
+        
+        # Max allowed velocity
         if (max_vel is None):
             self.max_vel = 10
         else:
             self.max_vel = max_vel
         
+        # Simulation duration
         if (t_f is None):
             self.t_f = 10 / max_vel
         else:
             self.t_f = t_f
             
+        # Time samples per sample (where 0.1 is the sampling time)    
         self.t_samples = int(self.t_f / 0.1)
+
+        print('Starting...')
+        start = timeit.default_timer()
+
         
-        self.X = np.zeros((n_samples, self.t_samples, n_agents, 2))
+        # Defining initial positions for agents
+        self.X_0_all = self.compute_agents_initial_positions(self.n_agents, 
+                                                       self.n_samples, 
+                                                       6,
+                                                       min_dist = self.min_dist)
         
-        self.X[:, 0, :, :] = self.compute_agents_initial_positions(n_agents, 
-                                                       n_samples, 
-                                                       comm_radius,
-                                                       min_dist = min_dist)
+        # Defining initial positions for goals
+        self.G_all = self.compute_goals_initial_positions(self.X_0_all, self.min_dist)
         
-        self.G = self.compute_goals_initial_positions(self.n_goals, 
-                                                      n_samples,
-                                                      min_dist)
+        # Compute assignments for agents-goals (using Hungarian Algorithm)
+        self.phi = self.compute_assignment_matrix(self.X_0_all, self.G_all)
         
-        self.phi = self.compute_assignment_matrix(self.X, self.G)
+        # Compute complete trajectories (iterated CAPT algorithm)
+        self.pos_all, self.vel_all, self.accel_all = self.simulated_trajectory(self.max_accel, self.X_0_all)
         
-        self.X = self.capt_trajectory(doPrint = True)
-        
-        self.comm_graph = self.compute_communication_graph(self.X,
-                                                           comm_radius)
-        
-        
-         
-        # Unclear if required?    
-        # self.Phi = np.kron(self.phi, np.eye(self.n_goals)) 
+        # Compute communication graphs for the simulated trajectories
+        self.comm_graph_all = self.compute_communication_graph(self.pos_all,
+                                                           self.degree)
+
+        # Compute the states for the entire dataset
+        self.state_all = self.compute_state(self.pos_all, self.G_all, self.comm_graph_all, self.degree)
+
+ 
+        # Separate the states into training, validation and testing samples
+        # and save them
+
+        # Create the dictionaries
+        self.init_pos = {}
+        self.pos = {}
+        self.vel = {}
+        self.accel = {}
+        self.comm_graph = {}
+        self.state = {}
+
+
+
+
+        #   Training set
+        self.samples['train']['signals'] = self.state_all[0:self.n_train].copy()
+        self.samples['train']['targets'] = self.accel_all[0:self.n_train].copy()
+        self.init_pos['train'] = self.X_0_all[0:self.n_train]
+        self.pos['train'] = self.pos_all[0:self.n_train]
+        self.vel['train'] = self.vel_all[0:self.n_train]
+        self.accel['train'] = self.accel_all[0:self.n_train]
+        self.comm_graph['train'] = self.comm_graph_all[0:self.n_train]
+        self.state['train'] = self.state_all[0:self.n_train]
+
+        #   Validation set
+        startSample = self.n_train
+        endSample = self.n_train + self.n_valid
+        self.samples['valid']['signals'] = self.state_all[startSample:endSample].copy()
+        self.samples['valid']['targets'] = self.accel_all[startSample:endSample].copy()
+        self.init_pos['valid'] = self.X_0_all[startSample:endSample]
+        self.pos['valid'] = self.pos_all[startSample:endSample]
+        self.vel['valid'] = self.vel_all[startSample:endSample]
+        self.accel['valid'] = self.accel_all[startSample:endSample]
+        self.comm_graph['valid'] = self.comm_graph_all[startSample:endSample]
+        self.state['valid'] = self.state_all[startSample:endSample]
+
+        #   Testing set
+        startSample = self.n_train + self.n_valid
+        endSample = self.n_train + self.n_valid + self.n_test
+        self.samples['test']['signals'] = self.state_all[startSample:endSample].copy()
+        self.samples['test']['targets'] = self.accel_all[startSample:endSample].copy()
+        self.init_pos['test'] = self.X_0_all[startSample:endSample]
+        self.pos['test'] = self.pos_all[startSample:endSample]
+        self.vel['test'] = self.vel_all[startSample:endSample]
+        self.accel['test'] = self.accel_all[startSample:endSample]
+        self.comm_graph['test'] = self.comm_graph_all[startSample:endSample]
+        self.state['test'] = self.state_all[startSample:endSample]
     
+
+        stop = timeit.default_timer()
+        print('Total time: ', stop - start, 's')
+        
     def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
                                         min_dist = 0.1, doPrint= True, **kwargs):
         """ 
@@ -91,8 +328,8 @@ class CAPT:
             The total number of agents that will take part in the simulation
         n_samples : int
             The total number of samples.
-        comm_radius : double
-            The communication radius between agents (determines initial spacing between agents)
+        comm_radius : double (legacy code)
+            The communication radius between agents (determines initial spacing between agents) 
         min_dist : double
             The minimum distance between each agent
     
@@ -150,39 +387,38 @@ class CAPT:
                                         high = distPerturb,
                                         size = (n_samples, n_agents,  2))
         # Initial positions
-        initPos = fixedPos + perturbPos
+        init_pos = fixedPos + perturbPos
         
         if doPrint:
             print("OK", flush = True)
               
-        return initPos
+        return init_pos
     
-    def compute_goals_initial_positions(self, n_goals, n_samples, min_dist):
+    def compute_goals_initial_positions(self, X_0, min_dist):
         """ 
         Generates a NumPy array with the 
         initial x, y position for each of the n_goals
         
         Parameters
         ----------
-        n_agents : int
-            The total number of goals that will take part in the simulation
-        n_samples : int
-            The total number of samples.
-        comm_radius : double
-            The communication radius between agents (determines initial spacing between agents)
-        min_dist : double
+        X_0 : np.array (n_samples x n_agents x 2) 
+            Initial positions of the agents for all samples
+        min_dist : double (legacy)
             The minimum distance between each agent
         
         Returns
         -------
         np.array (n_samples x n_goals x 2) 
         """
+
+        n_samples = X_0.shape[0]
+        n_goals = X_0.shape[1]
         
         # Find max/min positions
-        x_min = np.min(self.X[0, 0, :, 0]) - 5
-        y_min = np.min(self.X[0,0, :, 1]) - 5
-        x_max = np.max(self.X[0, 0,:, 0]) + 5
-        y_max = np.max(self.X[0, 0,:, 1]) + 5
+        x_min = np.min(X_0[0, :, 0]) - 5
+        y_min = np.min(X_0[0, :, 1]) - 5
+        x_max = np.max(X_0[0, :, 0]) + 5
+        y_max = np.max(X_0[0, :, 1]) + 5
       
         # Samples uniform distribution
         x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
@@ -204,49 +440,34 @@ class CAPT:
       
         return goals
     
-    def plot_initial_positions(self):
-        """ 
-        Plots initial positions of the goals and agents
-        
-        Parameters
-        ----------
-        N/A
-        
-        Returns
-        -------
-        N/A
-        """
-        
-        plt.scatter(self.X[0, :, 0], self.X[0, :, 1], label="goals", marker='.')
-        plt.scatter(self.G[0, :, 0], self.G[0, :, 1], label="agents", marker='x')
-        plt.title("Initial Positions")
-        plt.legend()
-        plt.show()
-    
-    def compute_assignment_matrix(self, X, G, doPrint = True):
+    def compute_assignment_matrix(self, X_0, G, doPrint = True):
         """ 
         Computes assignment matrix using the Hungarian Algorithm
         
         Parameters
         ----------
-        N/A
-        
+        X_0 : np.array (n_samples x n_agents x 2) 
+            Initial positions of the agents for all samples
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+ 
         Returns
         -------
         np.array (n_samples x n_agents x n_goals)
-        double (max distance)
         """
         
-        n_samples = self.n_samples
-        phi = np.zeros((n_samples, self.n_agents, self.n_agents))
+        n_samples = X_0.shape[0]
+        n_agents = X_0.shape[1]
+
+        phi = np.zeros((n_samples, n_agents, n_agents))
 
         if (doPrint):
             print('\tComputing assignment matrix...', end = ' ', flush = True)
         
         for sample in range(0, n_samples):
             # Obtains the initial posiition arrays
-            agents = self.X[sample, 0, :,:]
-            goals = self.G[sample, :,:]
+            agents = X_0[sample,:,:]
+            goals = G[sample,:,:]
             
             # Calculates distance matrix
             distance_matrix = cdist(agents, goals)
@@ -258,7 +479,7 @@ class CAPT:
             phi[sample, row_ind, col_ind] = 1
         
             if (doPrint):
-                percentageCount = int(100 * sample + 1) / self.n_samples
+                percentageCount = int(100 * sample + 1) / n_samples
                 if sample == 0:
                     # It's the first one, so just print it
                     print("%3d%%" % percentageCount,
@@ -283,7 +504,9 @@ class CAPT:
         Parameters
         ----------
         t : double
-            time index such that we obtain β(t)
+            time index that we define as the starting point
+        t : double
+            time index such that we obtain β(t) 
         
         Returns
         -------
@@ -297,14 +520,18 @@ class CAPT:
         
         return (alpha_0 * 1 + alpha_1 * t)
 
-    def compute_trajectory(self, sample, index, t_0 = 0):
+    def compute_trajectory(self, X, G, sample, t, t_0 = 0):
         """ 
         Computes the matrix X(t) (agent location) for the input t
         
         Parameters
         ----------
-        index : double
-            time index such that we obtain X(t)
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+        t : int
+            time integer index such that we obtain X(t). Note that this is an integer which is then converted.
         t_0 : double
             starting time index (i.e. the reference position to obtain X(t_0)),
             we set as default 0.0
@@ -315,24 +542,28 @@ class CAPT:
         """
         
         t_0 = int(t_0 * 0.1)
-        t = index * 0.1
+        t = t * 0.1
         
         beta = self.get_beta(t_0, t)
         phi = self.phi[sample,:,:]
-        G = self.G[sample,:,:]
-        X = self.X[sample,t_0*10, :,:]
+        G = G[sample,:,:]
         
+        # If the length is 4, we are passing in the entire trajectory; if it is
+        # 3, we are only passing the first time step.
+        if len(X.shape) == 4:
+            X = X[sample,t_0*10 - 1, :,:]
+        else:
+            X = X[sample, :,:]
         
         N = self.n_agents
         I = np.eye(N)
 
         trajectory = (1 - beta) * X \
             + beta * (phi @ G + (I - phi @ phi.T) @ X)
-            
-
+        
         return trajectory
     
-    def capt_trajectory(self, doPrint=True, t_0 = 0):
+    def capt_trajectory(self, X = None, doPrint=True, t_0 = 0):
         """ 
         Computes the matrix X(t) (agent location) for all t such
         that t_0 <= t <= t_f and optionally plots it. It will use the CAPT
@@ -343,6 +574,8 @@ class CAPT:
         
         Parameters
         ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
         doPrint : boolean
             determines whether to print the progress or not
         t_0 : integer
@@ -351,15 +584,20 @@ class CAPT:
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
-        
+        np.array (n_samples x t_samples x n_agents x 2)
         """
+
         t_samples = int((self.t_f - t_0 * 0.1) / 0.1)
         
         complete_trajectory = np.zeros((self.n_samples, 
                                         t_samples, 
                                         self.n_agents, 
                                         2))
+
+        if (X is None):
+            X = self.X_0_all
+        
+        G = self.G_all
         
         
         if (doPrint):
@@ -368,7 +606,7 @@ class CAPT:
         for sample in range(0, self.n_samples):
             for index in np.arange(0, t_samples):
                 complete_trajectory[sample, index, :, :] = \
-                    self.compute_trajectory(sample, index, t_0)
+                    self.compute_trajectory(X, G, sample, index, t_0)
                  
             if (doPrint):
                 percentageCount = int(100 * sample + 1) / self.n_samples
@@ -388,47 +626,43 @@ class CAPT:
             
         return complete_trajectory
     
-    def compute_communication_graph(self, pos, comm_radius, 
-                                    normalize_graph = True,
+    def compute_communication_graph(self, X, degree,
                                     doPrint = True):
         """ 
         Computes the communication graphs S for the entire position array at
-        each time instant. Note that since this function was originally part
-        of the Alelab GNN library, the position input has shape
-        n_samples x t_samples x 2 x n_agents. It must, therefore, be reshaped
-        before being used as an input.
+        each time instant.
         
         Parameters
         ----------
-        pos : np.array (n_samples x t_samples x 2 x n_agents)
-            position array for the agents
-        comm_radius : double
-            communication radius
-        normalize_graph : boolean
-            whether to normalize all elements by the largest eigenvalue
+         X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        degree : int
+            number of edges for each node (agent)
         doPrint : boolean
             whether to print progress or not.
             
-            
-        
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x n_agents)
         
         """
         
-        graphMatrix = np.zeros((self.n_samples, 
-                                self.t_samples, 
-                                self.n_agents, 
-                                self.n_agents))
+        n_samples = X.shape[0]
+        t_samples = X.shape[1]
+        n_agents = X.shape[2]
+
+        graphMatrix = np.zeros((n_samples, 
+                                t_samples, 
+                                n_agents, 
+                                n_agents))
         
         if (doPrint):
             print('\tComputing communication graph...', end = ' ', flush = True)
         
         for sample in range(0, self.n_samples):
             for t in range(0, self.t_samples):
-                neigh = NearestNeighbors(n_neighbors=self.degree)
-                neigh.fit(pos[sample, t, :, :])
+                neigh = NearestNeighbors(n_neighbors=degree)
+                neigh.fit(X[sample, t, :, :])
                 graphMatrix[sample, t, :, :] = np.array(neigh.kneighbors_graph(mode='connectivity').todense())    
         
         
@@ -452,21 +686,22 @@ class CAPT:
         return graphMatrix
         
     
-    def compute_velocity(self, doPrint = True, t_0 = 0):
+    def compute_velocity(self, X, doPrint = True, t_0 = 0):
         """ 
         Computes the matrix with the velocity (v_x, v_y) of each agent for all t such
         that t_0 <= t <= t_f.
         
         Parameters
         ----------
-        N/A
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x 2)
         
         """
-        complete_trajectory = self.capt_trajectory(doPrint=False, t_0 = t_0)
+        complete_trajectory = self.capt_trajectory(X = X, doPrint=False, t_0 = t_0)
         
         # Calculate the difference at each step
         v_x = np.diff(complete_trajectory[:,:,:,0], axis=1) / 0.1
@@ -481,23 +716,25 @@ class CAPT:
         
         return vel
     
-    def compute_acceleration(self, clip=True, t_0 = 0):
+    def compute_acceleration(self, X, clip=True, t_0 = 0):
         """ 
         Computes the matrix with the acceleration (a_x, a_y) of each agent for 
         all t such that t_0 <= t <= t_f.
         
         Parameters
         ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
         clip : boolean
             Determines wheter to limit the acceleration to the interval
             [-max_accel, max_accel]
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x 2)
         
         """
-        complete_velocity = self.compute_velocity(t_0 = t_0)
+        complete_velocity = self.compute_velocity(X = X, t_0 = t_0)
         
         # Calculate the difference at each step
         a_x = np.diff(complete_velocity[:,:,:,0], axis=1) / 0.1
@@ -515,50 +752,58 @@ class CAPT:
         
         return accel
     
-    def simulated_trajectory(self, doPrint = True):
+    def simulated_trajectory(self, max_accel, X_0, doPrint = True):
         """ 
         Calculates trajectory using the calculated acceleration. This function
         is particularly useful when clip is set to True in 
-        .compute_acceleration since it will generate trajectories that are
+        .compute_acceleration() since it will generate trajectories that are
         physically feasible.
         
         Parameters
         ----------
-        N/A
+        max_accel : double
+            Maximum acceleration allowed
+        X_0 : np.array (n_samples x n_agents x 2) 
+            Initial positions of the agents for all samples
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x 2)
         
         """
+
+        n_samples = X_0.shape[0]
         t_samples = int(self.t_f / 0.1)
+        n_agents = X_0.shape[1]
+
         
-        accel = self.compute_acceleration(clip=True, t_0 = 0)
+        accel = self.compute_acceleration(X = None, clip=True, t_0 = 0)
         
-        vel = np.zeros((self.n_samples, 
+        vel = np.zeros((n_samples, 
                         t_samples, 
-                        self.n_agents, 
+                        n_agents, 
                         2))
         
-        pos = np.zeros((self.n_samples, 
+        pos = np.zeros((n_samples, 
                         t_samples, 
-                        self.n_agents, 
+                        n_agents, 
                         2))
         
-        pos = self.X
+
+        pos[:, 0, :, :] = X_0
         
         if (doPrint):
             print('\tComputing simulated trajectories...', end = ' ', flush = True)
         
-        for sample in range(0, self.n_samples):
+        for sample in range(0, n_samples):
             for t in np.arange(1, t_samples):
         
                 if (t % 25 == 0):
-                    new_vel = self.compute_velocity(t_0 = t)[sample, 1, :, :]
+                    new_vel = self.compute_velocity(X = pos, t_0 = t)[sample, 1, :, :]
                    
                     new_accel = (new_vel - vel[sample, t-1, :, :]) / 0.1
                     
-                    accel[sample, t-1, :, :] = np.clip(new_accel, -self.max_accel, self.max_accel)
+                    accel[sample, t-1, :, :] = np.clip(new_accel, -max_accel, max_accel)
                     
                 vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
                          + accel[sample, t-1, :, :] * 0.1 
@@ -568,7 +813,7 @@ class CAPT:
                     + accel[sample, t - 1, :, :] * 0.1**2 / 2
                     
             if (doPrint):
-                percentageCount = int(100 * sample + 1) / self.n_samples
+                percentageCount = int(100 * sample + 1) / n_samples
                 if sample == 0:
                     # It's the first one, so just print it
                     print("%3d%%" % percentageCount,
@@ -585,50 +830,247 @@ class CAPT:
             print("OK", flush = True)
             
         return pos, vel, accel
+    
+    def compute_state(self, X, G, comm_graph, degree, doPrint = True):
+        """ 
+        Computes the states for all agents at all t_samples and all n_samples.
+        The state is a matrix with contents [X_agent, X_closest, G_closest],
+        where X_agent is the position of the agent itself, X_closest is the
+        position of the n_degree closest agents and G_closest is the position
+        of the n_degree closest goals. Each state, therefore, has 2(2*self.degree + 1) elements
         
+        Parameters
+        ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+        comm_graph : np.array (n_samples x t_samples x n_agents x n_agents)
+            communication graph (adjacency matrix)
+        degree : int
+            number of edges allowed per node
+        
+        Returns
+        -------
+        np.array (n_samples x t_samples x (2 * (2*self.degree + 1)) x n_agents)
+        
+        """
+        
+        n_samples = X.shape[0]
+        t_samples = X.shape[1]
+        n_agents = X.shape[2]
 
-start = timeit.default_timer()
-print('Starting...')
+        if (doPrint):
+            print('\tComputing states...', end = ' ', flush = True)
+        
+        d = 2 * degree + 1
+        state = np.zeros((n_samples, t_samples, d, n_agents, 2))
+        
+        # Finding closest goals
+        for sample in range(0, n_samples):
+                for t in range(0, t_samples):
+                    agents = X[sample, t, :,:]
+                    goals = G[sample, :,:]
+                    
+                    # Calculates distance matrix
+                    distance_matrix = cdist(agents, goals)
+                    
+                    for agent in range(0, n_agents):
+                        distance_to_goals = distance_matrix[agent, :]
+                        closest_goals_index = np.argpartition(distance_to_goals, degree)[0:degree]
+                        
+                        # TODO: relative or absolute position?
+                        # distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
+                        
+                        # Goals
+                        state[sample, t, -degree:, agent, :] = goals[closest_goals_index]
+                        
+                        # Own positions  
+                        state[sample, t, 0, agent, :] = X[sample, t, agent,:]
+                        
+                        # Other agents
+                        closest_agents_index = comm_graph[sample, t, agent, :] == 1
+                        state[sample, t, 1:degree+1, agent, :] = X[sample, t, closest_agents_index]
+            
+                if (doPrint):
+                    percentageCount = int(100 * sample + 1) / n_samples
+                    if sample == 0:
+                        # It's the first one, so just print it
+                        print("%3d%%" % percentageCount,
+                              end = '', flush = True)
+                    else:
+                        # Erase the previous characters
+                        print('\b \b' * 4 + "%3d%%" % percentageCount,
+                              end = '', flush = True)
+        
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
+            
+        return state
+    
+    def evaluate(self, X, G, R):
+        """ 
+        Computes the total cost of the trajectory averaged over all samples. 
+        The cost is associated with the number of goals with no agent located
+        at distance less than R.
+        
+        Parameters
+        ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+        R : double
+            tolerance regarding goal-agent distance
+        
+        Returns
+        -------
+        double
+        
+        """
+        final_pos = X[:,-1, :, :]
+        n_samples = X.shape[0]
+        goals = G
+        mean_cost = 0
+        
+        for sample in range(0, n_samples):
+            # Calculate distance
+            distance_matrix = cdist(final_pos[sample, :, :], goals[sample, :, :])
+            
+            # Find the closest agent distance
+            distance_matrix = np.min(distance_matrix, axis=1)
+            
+            # Check which goals have no agents at distance R (or greater)
+            distance_matrix = distance_matrix > R
+            
+            # Count the number of goals with no agents at distance R (or greater)
+            curr_cost = np.sum(distance_matrix)
+                        
+            # Running (iterative) average
+            mean_cost = mean_cost + (1 / (sample + 1)) * (curr_cost - mean_cost)
+            
+        return -mean_cost
+    
+    def getData(self, name, samplesType, *args):
+        """ 
+        Returns the specified data from the dataset
+        
+        Parameters
+        ----------
+        name : str
+            data type (pos, vel, etc.)
+        sampleType : str
+            data category (train, valid, test)
+        
+        Returns
+        -------
+        np.array
+        
+        """
+        
+        # samplesType: train, valid, test
+        # args: 0 args, give back all
+        # args: 1 arg: if int, give that number of samples, chosen at random
+        # args: 1 arg: if list, give those samples precisely.
+        
+        # Check that the type is one of the possible ones
+        assert samplesType == 'train' or samplesType == 'valid' \
+                    or samplesType == 'test'
+        # Check that the number of extra arguments fits
+        assert len(args) <= 1
+                    
+        # Check that the name is actually an attribute
+        assert name in dir(self)
+        
+        # Get the desired attribute
+        thisDataDict = getattr(self, name)
+        
+        # Check it's a dictionary and that it has the corresponding key
+        assert type(thisDataDict) is dict
+        assert samplesType in thisDataDict.keys()
+        
+        # Get the data now
+        thisData = thisDataDict[samplesType]
+        # Get the dimension length
+        thisDataDims = len(thisData.shape)
+        
+        # Check that it has at least two dimension, where the first one is
+        # always the number of samples
+        assert thisDataDims > 1
+        
+        if len(args) == 1:
+            # If it is an int, just return that number of randomly chosen
+            # samples.
+            if type(args[0]) == int:
+                nSamples = thisData.shape[0] # total number of samples
+                # We can't return more samples than there are available
+                assert args[0] <= nSamples
+                # Randomly choose args[0] indices
+                selectedIndices = np.random.choice(nSamples, size = args[0],
+                                                   replace = False)
+                # Select the corresponding samples
+                thisData = thisData[selectedIndices]
+            else:
+                # The fact that we put else here instead of elif type()==list
+                # allows for np.array to be used as indices as well. In general,
+                # any variable with the ability to index.
+                thisData = thisData[args[0]]
+                
+            # If we only selected a single element, then the nDataPoints dim
+            # has been left out. So if we have less dimensions, we have to
+            # put it back
+            if len(thisData.shape) < thisDataDims:
+                if 'torch' in repr(thisData.dtype):
+                    thisData =thisData.unsqueeze(0)
+                else:
+                    thisData = np.expand_dims(thisData, axis = 0)
 
-sample = 0 # sample to graph    
-
-capt = CAPT(n_agents = 30, comm_radius=6, min_dist=2, n_samples=10, t_f = 10, max_accel = 10, degree = 3)
-
-pos, vel, accel = capt.simulated_trajectory()
-
-for t in range(0, pos.shape[1]):
-    plt.scatter(pos[sample, t, :, 0], 
-                pos[sample, t, :, 1], 
-                marker='.', 
-                color='gray',
-                label='',
-                s=0.8, linewidths=0.2)
-
-plt.scatter(capt.G[sample, :, 0], capt.G[sample, :, 1], 
-                label="goal", marker='x', color='r')
-
-plt.scatter(pos[sample, 0, :, 0], 
-            pos[sample, 0, :, 1], 
-            marker='o', 
-            color='red',
-            label='start')
-
-plt.grid()    
-plt.title('Trajectories')
-plt.legend()
-plt.show()
-
-#plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
-stop = timeit.default_timer()
-
-accel = capt.compute_acceleration()[0]
-
-graph = capt.comm_graph[0]
-
-print()
-print('Total time: ', stop - start, 's')
+        return thisData
 
 
 
+##########
+# Driver #
+##########
+
+capt = CAPT(n_agents = 50,
+            min_dist = 0.5, 
+            t_f = 10, 
+            max_accel = 5,
+            degree = 5,
+            n_train = 1, 
+            n_valid = 0, 
+            n_test = 0)
 
 
+
+# Plotting (uncomment to visualize trajectory)
+
+# sample = 0
+# pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
+
+# for t in range(0, pos.shape[1]):
+#     plt.scatter(pos[sample, t, :, 0], 
+#                 pos[sample, t, :, 1], 
+#                 marker='.', 
+#                 color='gray',
+#                 label='',
+#                 s=0.8, linewidths=0.2)
+
+# plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
+#                 label="goal", marker='x', color='r')
+
+# plt.scatter(pos[sample, 0, :, 0], 
+#             pos[sample, 0, :, 1], 
+#             marker='o', 
+#             color='red',
+#             label='start')
+
+# plt.grid()    
+# plt.title('Trajectories')
+# plt.legend()
+# plt.show()
+# #plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
