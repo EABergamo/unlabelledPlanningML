@@ -74,6 +74,10 @@ class CAPT:
         self.comm_graph = self.compute_communication_graph(self.X,
                                                            comm_radius)
         
+        self.pos, self.vel, self.accel = self.simulated_trajectory()
+        
+        self.states = self.compute_state()
+        
         
          
         # Unclear if required?    
@@ -393,14 +397,11 @@ class CAPT:
                                     doPrint = True):
         """ 
         Computes the communication graphs S for the entire position array at
-        each time instant. Note that since this function was originally part
-        of the Alelab GNN library, the position input has shape
-        n_samples x t_samples x 2 x n_agents. It must, therefore, be reshaped
-        before being used as an input.
+        each time instant.
         
         Parameters
         ----------
-        pos : np.array (n_samples x t_samples x 2 x n_agents)
+        pos : np.array (n_samples x t_samples x n_agents, 2)
             position array for the agents
         comm_radius : double
             communication radius
@@ -586,15 +587,17 @@ class CAPT:
             
         return pos, vel, accel
     
-    def compute_state(self):
+    def compute_state(self, doPrint = True):
+        
+        if (doPrint):
+            print('\tComputing states...', end = ' ', flush = True)
         
         d = 2 * self.degree + 1
-        state = np.zeros((self.n_samples, self.t_samples, d, 2))
+        state = np.zeros((self.n_samples, self.t_samples, d, self.n_agents, 2))
         
         # Finding closest goals
         for sample in range(0, self.n_samples):
                 for t in range(0, self.t_samples):
-                    X = self.X
                     agents = self.X[sample, t, :,:]
                     goals = self.G[sample, :,:]
                     
@@ -605,22 +608,37 @@ class CAPT:
                         distance_to_goals = distance_matrix[agent, :]
                         closest_goals_index = np.argpartition(distance_to_goals, self.degree)[0:self.degree]
                         
-                        goals_closest = goals[closest_goals_index]
-                                                
                         # TODO: relative or absolute position?
                         # distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
                         
-                        state[sample, t, -self.degree:, :] = goals[closest_goals_index]
+                        # Goals
+                        state[sample, t, -self.degree:, agent, :] = goals[closest_goals_index]
                         
+                        # Own positions
+                        state[sample, t, 0, agent, :] = self.X[sample, t, agent,:]
+                        
+                        # Other agents
+                        closest_agents_index = self.comm_graph[sample, t, agent, :] == 1
+                        state[sample, t, 1:self.degree+1, agent, :] = self.X[sample, t, closest_agents_index]
+            
+                if (doPrint):
+                    percentageCount = int(100 * sample + 1) / self.n_samples
+                    if sample == 0:
+                        # It's the first one, so just print it
+                        print("%3d%%" % percentageCount,
+                              end = '', flush = True)
+                    else:
+                        # Erase the previous characters
+                        print('\b \b' * 4 + "%3d%%" % percentageCount,
+                              end = '', flush = True)
         
+        # Print
+        if doPrint:
+            # Erase the percentage
+            print('\b \b' * 4, end = '', flush = True)
+            print("OK", flush = True)
+            
         return state
-
-                    
-                    
-                
-                
-                
-        
         
 
 start = timeit.default_timer()
@@ -628,9 +646,16 @@ print('Starting...')
 
 sample = 0 # sample to graph    
 
-capt = CAPT(n_agents = 30, comm_radius=6, min_dist=2, n_samples=1, t_f = 10, max_accel = 10, degree = 3)
+capt = CAPT(n_agents = 30, 
+            comm_radius=6, 
+            min_dist=2, 
+            n_samples=10, 
+            t_f = 10, 
+            max_accel = 10, 
+            degree = 3)
 
-pos, vel, accel = capt.simulated_trajectory()
+# Plotting
+pos, vel, accel = capt.pos, capt.vel, capt.accel
 
 for t in range(0, pos.shape[1]):
     plt.scatter(pos[sample, t, :, 0], 
@@ -653,13 +678,12 @@ plt.grid()
 plt.title('Trajectories')
 plt.legend()
 plt.show()
-
 #plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
+
+
 stop = timeit.default_timer()
 
-accel = capt.compute_acceleration()[0]
 
-a = capt.compute_state()[0]
 print()
 print('Total time: ', stop - start, 's')
 
