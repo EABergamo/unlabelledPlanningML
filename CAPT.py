@@ -6,7 +6,6 @@ import utils
 import timeit
 from sklearn.neighbors import NearestNeighbors
 
-
 zeroTolerance = utils.zeroTolerance
 
 class CAPT:
@@ -588,6 +587,23 @@ class CAPT:
         return pos, vel, accel
     
     def compute_state(self, doPrint = True):
+        """ 
+        Computes the states for all agents at all t_samples and all n_samples.
+        The state is a matrix with contents [X_agent, X_closest, G_closest],
+        where X_agent is the position of the agent itself, X_closest is the
+        position of the n_degree closest agents and G_closest is the position
+        of the n_degree closest goals.
+        
+        Parameters
+        ----------
+        doPrint : boolean
+            whether to print progress or not.
+        
+        Returns
+        -------
+        np.array (n_samples x (t_f / 0.1) x (2 * self.degree + 10 x n_agents x 2)
+        
+        """
         
         if (doPrint):
             print('\tComputing states...', end = ' ', flush = True)
@@ -639,6 +655,45 @@ class CAPT:
             print("OK", flush = True)
             
         return state
+    
+    def evaluate(self, R):
+        """ 
+        Computes the total cost of the trajectory averaged over all samples. 
+        The cost is associated with the number of goals with no agent located
+        at distance less than R.
+        
+        Parameters
+        ----------
+        R : double
+            tolerance regarding goal-agent distance
+        
+        Returns
+        -------
+        double
+        
+        """
+        final_pos = self.X[:,-1, :, :]
+        goals = self.G
+        mean_cost = 0
+        
+        for sample in range(0, self.n_samples):
+            # Calculate distance
+            distance_matrix = cdist(final_pos[sample, :, :], goals[sample, :, :])
+            
+            # Find the closest agent distance
+            distance_matrix = np.min(distance_matrix, axis=1)
+            
+            # Check which goals have no agents at distance R (or greater)
+            distance_matrix = distance_matrix > R
+            
+            # Count the number of goals with no agents at distance R (or greater)
+            curr_cost = np.sum(distance_matrix)
+                        
+            # Running (iterative) average
+            mean_cost = mean_cost + (1 / (sample + 1)) * (curr_cost - mean_cost)
+            
+        return -mean_cost
+            
         
 
 start = timeit.default_timer()
@@ -649,7 +704,7 @@ sample = 0 # sample to graph
 capt = CAPT(n_agents = 30, 
             comm_radius=6, 
             min_dist=2, 
-            n_samples=10, 
+            n_samples=1, 
             t_f = 10, 
             max_accel = 10, 
             degree = 3)
@@ -683,11 +738,7 @@ plt.show()
 
 stop = timeit.default_timer()
 
+print(capt.evaluate(0.5))
 
 print()
 print('Total time: ', stop - start, 's')
-
-
-
-
-
