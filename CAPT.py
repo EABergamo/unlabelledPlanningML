@@ -5,10 +5,180 @@ from scipy.optimize import linear_sum_assignment
 import utils
 import timeit
 from sklearn.neighbors import NearestNeighbors
+import torch
 
 zeroTolerance = utils.zeroTolerance
 
-class CAPT:
+class _data:
+    # Internal supraclass from which all data sets will inherit.
+    # There are certain methods that all Data classes must have:
+    #   getSamples(), expandDims(), to() and astype().
+    # To avoid coding this methods over and over again, we create a class from
+    # which the data can inherit this basic methods.
+    
+    # All the signals are always assumed to be graph signals that are written
+    #   nDataPoints (x nFeatures) x nNodes
+    # If we have one feature, we have the expandDims() that adds a x1 so that
+    # it can be readily processed by architectures/functions that always assume
+    # a 3-dimensional signal.
+    
+    def __init__(self):
+        # Minimal set of attributes that all data classes should have
+        self.dataType = None
+        self.device = None
+        self.n_train = None
+        self.n_valid = None
+        self.n_test = None
+        self.samples = {}
+        self.samples['train'] = {}
+        self.samples['train']['signals'] = None
+        self.samples['train']['targets'] = None
+        self.samples['valid'] = {}
+        self.samples['valid']['signals'] = None
+        self.samples['valid']['targets'] = None
+        self.samples['test'] = {}
+        self.samples['test']['signals'] = None
+        self.samples['test']['targets'] = None
+        
+    def getSamples(self, samplesType, *args):
+        # samplesType: train, valid, test
+        # args: 0 args, give back all
+        # args: 1 arg: if int, give that number of samples, chosen at random
+        # args: 1 arg: if list, give those samples precisely.
+        # Check that the type is one of the possible ones
+        assert samplesType == 'train' or samplesType == 'valid' \
+                    or samplesType == 'test'
+        # Check that the number of extra arguments fits
+        assert len(args) <= 1
+        # If there are no arguments, just return all the desired samples
+        x = self.samples[samplesType]['signals']
+        y = self.samples[samplesType]['targets']
+        # If there's an argument, we have to check whether it is an int or a
+        # list
+        if len(args) == 1:
+            # If it is an int, just return that number of randomly chosen
+            # samples.
+            if type(args[0]) == int:
+                nSamples = x.shape[0] # total number of samples
+                # We can't return more samples than there are available
+                assert args[0] <= nSamples
+                # Randomly choose args[0] indices
+                selectedIndices = np.random.choice(nSamples, size = args[0],
+                                                   replace = False)
+                # Select the corresponding samples
+                xSelected = x[selectedIndices]
+                y = y[selectedIndices]
+            else:
+                # The fact that we put else here instead of elif type()==list
+                # allows for np.array to be used as indices as well. In general,
+                # any variable with the ability to index.
+                xSelected = x[args[0]]
+                # And assign the labels
+                y = y[args[0]]
+                
+            # If we only selected a single element, then the nDataPoints dim
+            # has been left out. So if we have less dimensions, we have to
+            # put it back
+            if len(xSelected.shape) < len(x.shape):
+                if 'torch' in self.dataType:
+                    x = xSelected.unsqueeze(0)
+                else:
+                    x = np.expand_dims(xSelected, axis = 0)
+            else:
+                x = xSelected
+
+        return x, y
+    
+    def expandDims(self):
+        
+        # For each data set partition
+        for key in self.samples.keys():
+            # If there's something in them
+            if self.samples[key]['signals'] is not None:
+                # And if it has only two dimensions
+                #   (shape: nDataPoints x nNodes)
+                if len(self.samples[key]['signals'].shape) == 2:
+                    # Then add a third dimension in between so that it ends
+                    # up with shape
+                    #   nDataPoints x 1 x nNodes
+                    # and it respects the 3-dimensional format that is taken
+                    # by many of the processing functions
+                    if 'torch' in repr(self.dataType):
+                        self.samples[key]['signals'] = \
+                                       self.samples[key]['signals'].unsqueeze(1)
+                    else:
+                        self.samples[key]['signals'] = np.expand_dims(
+                                                   self.samples[key]['signals'],
+                                                   axis = 1)
+                elif len(self.samples[key]['signals'].shape) == 3:
+                    if 'torch' in repr(self.dataType):
+                        self.samples[key]['signals'] = \
+                                       self.samples[key]['signals'].unsqueeze(2)
+                    else:
+                        self.samples[key]['signals'] = np.expand_dims(
+                                                   self.samples[key]['signals'],
+                                                   axis = 2)
+        
+    def astype(self, dataType):
+        # This changes the type for the minimal attributes (samples). This 
+        # methods should still be initialized within the data classes, if more
+        # attributes are used.
+        
+        # The labels could be integers as created from the dataset, so if they
+        # are, we need to be sure they are integers also after conversion. 
+        # To do this we need to match the desired dataType to its int 
+        # counterpart. Typical examples are:
+        #   numpy.float64 -> numpy.int64
+        #   numpy.float32 -> numpy.int32
+        #   torch.float64 -> torch.int64
+        #   torch.float32 -> torch.int32
+        
+        targetType = str(self.samples['train']['targets'].dtype)
+        if 'int' in targetType:
+            if 'numpy' in repr(dataType):
+                if '64' in targetType:
+                    targetType = np.int64
+                elif '32' in targetType:
+                    targetType = np.int32
+            elif 'torch' in repr(dataType):
+                if '64' in targetType:
+                    targetType = torch.int64
+                elif '32' in targetType:
+                    targetType = torch.int32
+        else: # If there is no int, just stick with the given dataType
+            targetType = dataType
+        
+        # Now that we have selected the dataType, and the corresponding
+        # labelType, we can proceed to convert the data into the corresponding
+        # type
+        for key in self.samples.keys():
+            self.samples[key]['signals'] = utils.changeDataType(
+                                                   self.samples[key]['signals'],
+                                                   dataType)
+            self.samples[key]['targets'] = utils.changeDataType(
+                                                   self.samples[key]['targets'],
+                                                   targetType)
+
+        # Update attribute
+        if dataType is not self.dataType:
+            self.dataType = dataType
+
+    def to(self, device):
+        # This changes the type for the minimal attributes (samples). This 
+        # methods should still be initialized within the data classes, if more
+        # attributes are used.
+        # This can only be done if they are torch tensors
+        if 'torch' in repr(self.dataType):
+            for key in self.samples.keys():
+                for secondKey in self.samples[key].keys():
+                    self.samples[key][secondKey] \
+                                      = self.samples[key][secondKey].to(device)
+
+            # If the device changed, save it.
+            if device is not self.device:
+                self.device = device
+
+class CAPT(_data):
     """
     A wrapper class to execute the CAPT algorithm by Matthew Turpin
     (https://journals.sagepub.com/doi/10.1177/0278364913515307). Certain 
@@ -34,16 +204,23 @@ class CAPT:
         Number of edges (connections) per node
     """
 
-    def __init__(self, n_agents, min_dist, n_samples, 
+    def __init__(self, n_agents, min_dist,
+                 n_train, n_valid, n_test,
                  max_vel = None, t_f=None, max_accel = 5, degree = 5):
+
+        super().__init__()
         
         self.zeroTolerance = 1e-7 # all values less then this are zero
         self.n_agents = n_agents # number of agents
         self.min_dist = min_dist # minimum initial distance between agents 
         self.n_goals = n_agents # number of goals (same as n_agents by design)
-        self.n_samples = n_samples # number of samples
         self.max_accel = max_accel # max allowed acceleration
         self.degree = degree # number of edges for each node (agent)
+
+        # Dataset information
+        self.n_train, self.n_valid, self.n_test =  n_train, n_valid, n_test
+        self.n_samples = n_train + n_valid + n_test # number of samples
+
         
         # Max allowed velocity
         if (max_vel is None):
@@ -61,31 +238,75 @@ class CAPT:
         self.t_samples = int(self.t_f / 0.1)
         
         # Defining initial positions for agents
-        self.X_0 = self.compute_agents_initial_positions(n_agents, 
-                                                       n_samples, 
+        self.X_0_all = self.compute_agents_initial_positions(self.n_agents, 
+                                                       self.n_samples, 
                                                        6,
-                                                       min_dist = min_dist)
+                                                       min_dist = self.min_dist)
         
         # Defining initial positions for goals
-        self.G = self.compute_goals_initial_positions(self.X_0, min_dist)
+        self.G_all = self.compute_goals_initial_positions(self.X_0_all, self.min_dist)
         
         # Compute assignments for agents-goals (using Hungarian Algorithm)
-        self.phi = self.compute_assignment_matrix(self.X_0, self.G)
+        self.phi = self.compute_assignment_matrix(self.X_0_all, self.G_all)
         
         # Compute complete trajectories (iterated CAPT algorithm)
-        self.pos, self.vel, self.accel = self.simulated_trajectory(self.max_accel, self.X_0)
+        self.pos_all, self.vel_all, self.accel_all = self.simulated_trajectory(self.max_accel, self.X_0_all)
         
         # Compute communication graphs for the simulated trajectories
-        self.comm_graph = self.compute_communication_graph(self.pos,
+        self.comm_graph_all = self.compute_communication_graph(self.pos_all,
                                                            self.degree)
 
-        
-        self.states = self.compute_state(self.pos, self.G, self.comm_graph, self.degree)
-        
-        
-         
-        # Unclear if required?    
-        # self.Phi = np.kron(self.phi, np.eye(self.n_goals)) 
+        # Compute the states for the entire dataset
+        self.state_all = self.compute_state(self.pos_all, self.G_all, self.comm_graph_all, self.degree)
+
+ 
+        # Separate the states into training, validation and testing samples
+        # and save them
+
+        # Create the dictionaries
+        self.init_pos = {}
+        self.pos = {}
+        self.vel = {}
+        self.accel = {}
+        self.comm_graph = {}
+        self.state = {}
+
+
+
+
+        #   Training set
+        self.samples['train']['signals'] = self.state_all[0:self.n_train].copy()
+        self.samples['train']['targets'] = self.accel_all[0:self.n_train].copy()
+        self.init_pos['train'] = self.X_0_all[0:self.n_train]
+        self.pos['train'] = self.pos_all[0:self.n_train]
+        self.vel['train'] = self.vel_all[0:self.n_train]
+        self.accel['train'] = self.accel_all[0:self.n_train]
+        self.comm_graph['train'] = self.comm_graph_all[0:self.n_train]
+        self.state['train'] = self.state_all[0:self.n_train]
+
+        #   Validation set
+        startSample = self.n_train
+        endSample = self.n_train + self.n_valid
+        self.samples['valid']['signals'] = self.state_all[startSample:endSample].copy()
+        self.samples['valid']['targets'] = self.accel_all[startSample:endSample].copy()
+        self.init_pos['valid'] = self.X_0_all[startSample:endSample]
+        self.pos['valid'] = self.pos_all[startSample:endSample]
+        self.vel['valid'] = self.vel_all[startSample:endSample]
+        self.accel['valid'] = self.accel_all[startSample:endSample]
+        self.comm_graph['valid'] = self.comm_graph_all[startSample:endSample]
+        self.state['valid'] = self.state_all[startSample:endSample]
+
+        #   Testing set
+        startSample = self.n_train + self.n_valid
+        endSample = self.n_train + self.n_valid + self.n_test
+        self.samples['test']['signals'] = self.state_all[startSample:endSample].copy()
+        self.samples['test']['targets'] = self.accel_all[startSample:endSample].copy()
+        self.init_pos['test'] = self.X_0_all[startSample:endSample]
+        self.pos['test'] = self.pos_all[startSample:endSample]
+        self.vel['test'] = self.vel_all[startSample:endSample]
+        self.accel['test'] = self.accel_all[startSample:endSample]
+        self.comm_graph['test'] = self.comm_graph_all[startSample:endSample]
+        self.state['test'] = self.state_all[startSample:endSample]
     
     def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
                                         min_dist = 0.1, doPrint= True, **kwargs):
@@ -158,12 +379,12 @@ class CAPT:
                                         high = distPerturb,
                                         size = (n_samples, n_agents,  2))
         # Initial positions
-        initPos = fixedPos + perturbPos
+        init_pos = fixedPos + perturbPos
         
         if doPrint:
             print("OK", flush = True)
               
-        return initPos
+        return init_pos
     
     def compute_goals_initial_positions(self, X_0, min_dist):
         """ 
@@ -366,9 +587,9 @@ class CAPT:
                                         2))
 
         if (X is None):
-            X = self.X_0
+            X = self.X_0_all
         
-        G = self.G
+        G = self.G_all
         
         
         if (doPrint):
@@ -807,15 +1028,16 @@ print('Starting...')
 
 sample = 0 # sample to graph    
 
-capt = CAPT(n_agents = 30, 
-            min_dist=2, 
-            n_samples=1, 
-            t_f = 10, 
-            max_accel = 5, 
-            degree = 3)
-
+capt = CAPT(n_agents = 50,
+            min_dist = 2, 
+            t_f = 15, 
+            max_accel = 5,
+            degree = 5,
+            n_train = 1, 
+            n_valid = 0, 
+            n_test = 0)
 # Plotting
-pos, vel, accel = capt.pos, capt.vel, capt.accel
+pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
 
 for t in range(0, pos.shape[1]):
     plt.scatter(pos[sample, t, :, 0], 
@@ -825,7 +1047,7 @@ for t in range(0, pos.shape[1]):
                 label='',
                 s=0.8, linewidths=0.2)
 
-plt.scatter(capt.G[sample, :, 0], capt.G[sample, :, 1], 
+plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
                 label="goal", marker='x', color='r')
 
 plt.scatter(pos[sample, 0, :, 0], 
@@ -837,13 +1059,15 @@ plt.scatter(pos[sample, 0, :, 0],
 plt.grid()    
 plt.title('Trajectories')
 plt.legend()
-plt.show()
+#plt.show()
 #plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
 
 
 stop = timeit.default_timer()
 
-print(capt.evaluate(0.5))
+print(capt.evaluate(pos, capt.G_all, 0.5))
 
 print()
 print('Total time: ', stop - start, 's')
+
+
