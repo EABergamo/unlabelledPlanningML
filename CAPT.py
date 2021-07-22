@@ -19,25 +19,26 @@ class CAPT:
     Attributes
     ----------
     n_agents : int
-              The total number of agents that will take part in the simulation
+        The total number of agents that will take part in the simulation
+    min_dist : double
+        The minimum distanc between agents
     n_samples : int
         The total number of samples.
-    comm_radius : double
-        The communication radius between agents (determines initial spacing between agents)
-    min_dist : double
-        The minimum distance between each agent
-    
-    Methods
-    -------
-    computeInitialPositions : np.array (n_samples x 2 x n_agents)
+    max_vel = double
+        Maximum velocity allowed
+    t_f = double
+        Simulation time
+    max_accel : double
+        Maximum acceleration allowed
+    degree : int
+        Number of edges (connections) per node
     """
 
-    def __init__(self, n_agents, comm_radius, min_dist, n_samples, 
+    def __init__(self, n_agents, min_dist, n_samples, 
                  max_vel = None, t_f=None, max_accel = 5, degree = 5):
         
         self.zeroTolerance = 1e-7 # all values less then this are zero
         self.n_agents = n_agents # number of agents
-        self.comm_radius = comm_radius # communication radius
         self.min_dist = min_dist # minimum initial distance between agents 
         self.n_goals = n_agents # number of goals (same as n_agents by design)
         self.n_samples = n_samples # number of samples
@@ -62,17 +63,17 @@ class CAPT:
         # Defining initial positions for agents
         self.X_0 = self.compute_agents_initial_positions(n_agents, 
                                                        n_samples, 
-                                                       comm_radius,
+                                                       6,
                                                        min_dist = min_dist)
         
         # Defining initial positions for goals
-        self.G = self.compute_goals_initial_positions(self.X_0, self.n_goals, n_samples, min_dist)
+        self.G = self.compute_goals_initial_positions(self.X_0, min_dist)
         
         # Compute assignments for agents-goals (using Hungarian Algorithm)
         self.phi = self.compute_assignment_matrix(self.X_0, self.G)
         
         # Compute complete trajectories (iterated CAPT algorithm)
-        self.pos, self.vel, self.accel = self.simulated_trajectory(self.n_samples, self.n_agents, self.max_accel, self.X_0)
+        self.pos, self.vel, self.accel = self.simulated_trajectory(self.max_accel, self.X_0)
         
         # Compute communication graphs for the simulated trajectories
         self.comm_graph = self.compute_communication_graph(self.pos,
@@ -98,8 +99,8 @@ class CAPT:
             The total number of agents that will take part in the simulation
         n_samples : int
             The total number of samples.
-        comm_radius : double
-            The communication radius between agents (determines initial spacing between agents)
+        comm_radius : double (legacy code)
+            The communication radius between agents (determines initial spacing between agents) 
         min_dist : double
             The minimum distance between each agent
     
@@ -164,26 +165,25 @@ class CAPT:
               
         return initPos
     
-    def compute_goals_initial_positions(self, X_0, n_goals, n_samples, min_dist):
+    def compute_goals_initial_positions(self, X_0, min_dist):
         """ 
         Generates a NumPy array with the 
         initial x, y position for each of the n_goals
         
         Parameters
         ----------
-        n_agents : int
-            The total number of goals that will take part in the simulation
-        n_samples : int
-            The total number of samples.
-        comm_radius : double
-            The communication radius between agents (determines initial spacing between agents)
-        min_dist : double
+        X_0 : np.array (n_samples x n_agents x 2) 
+            Initial positions of the agents for all samples
+        min_dist : double (legacy)
             The minimum distance between each agent
         
         Returns
         -------
         np.array (n_samples x n_goals x 2) 
         """
+
+        n_samples = X_0.shape[0]
+        n_goals = X_0.shape[1]
         
         # Find max/min positions
         x_min = np.min(X_0[0, :, 0]) - 5
@@ -211,37 +211,20 @@ class CAPT:
       
         return goals
     
-    def plot_initial_positions(self):
-        """ 
-        Plots initial positions of the goals and agents
-        
-        Parameters
-        ----------
-        N/A
-        
-        Returns
-        -------
-        N/A
-        """
-        
-        plt.scatter(self.X_0[0, :, 0], self.X_0[0, :, 1], label="goals", marker='.')
-        plt.scatter(self.G[0, :, 0], self.G[0, :, 1], label="agents", marker='x')
-        plt.title("Initial Positions")
-        plt.legend()
-        plt.show()
-    
     def compute_assignment_matrix(self, X_0, G, doPrint = True):
         """ 
         Computes assignment matrix using the Hungarian Algorithm
         
         Parameters
         ----------
-        N/A
-        
+        X_0 : np.array (n_samples x n_agents x 2) 
+            Initial positions of the agents for all samples
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+ 
         Returns
         -------
         np.array (n_samples x n_agents x n_goals)
-        double (max distance)
         """
         
         n_samples = X_0.shape[0]
@@ -292,7 +275,9 @@ class CAPT:
         Parameters
         ----------
         t : double
-            time index such that we obtain β(t)
+            time index that we define as the starting point
+        t : double
+            time index such that we obtain β(t) 
         
         Returns
         -------
@@ -306,14 +291,18 @@ class CAPT:
         
         return (alpha_0 * 1 + alpha_1 * t)
 
-    def compute_trajectory(self, X, G, sample, index, t_0 = 0):
+    def compute_trajectory(self, X, G, sample, t, t_0 = 0):
         """ 
         Computes the matrix X(t) (agent location) for the input t
         
         Parameters
         ----------
-        index : double
-            time index such that we obtain X(t)
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+        t : int
+            time integer index such that we obtain X(t). Note that this is an integer which is then converted.
         t_0 : double
             starting time index (i.e. the reference position to obtain X(t_0)),
             we set as default 0.0
@@ -324,7 +313,7 @@ class CAPT:
         """
         
         t_0 = int(t_0 * 0.1)
-        t = index * 0.1
+        t = t * 0.1
         
         beta = self.get_beta(t_0, t)
         phi = self.phi[sample,:,:]
@@ -356,6 +345,8 @@ class CAPT:
         
         Parameters
         ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
         doPrint : boolean
             determines whether to print the progress or not
         t_0 : integer
@@ -364,9 +355,9 @@ class CAPT:
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
-        
+        np.array (n_samples x t_samples x n_agents x 2)
         """
+
         t_samples = int((self.t_f - t_0 * 0.1) / 0.1)
         
         complete_trajectory = np.zeros((self.n_samples, 
@@ -407,7 +398,6 @@ class CAPT:
         return complete_trajectory
     
     def compute_communication_graph(self, X, degree,
-                                    normalize_graph = True,
                                     doPrint = True):
         """ 
         Computes the communication graphs S for the entire position array at
@@ -415,20 +405,16 @@ class CAPT:
         
         Parameters
         ----------
-        pos : np.array (n_samples x t_samples x n_agents, 2)
-            position array for the agents
-        comm_radius : double
-            communication radius
-        normalize_graph : boolean
-            whether to normalize all elements by the largest eigenvalue
+         X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        degree : int
+            number of edges for each node (agent)
         doPrint : boolean
             whether to print progress or not.
             
-            
-        
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x n_agents)
         
         """
         
@@ -478,11 +464,12 @@ class CAPT:
         
         Parameters
         ----------
-        N/A
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x 2)
         
         """
         complete_trajectory = self.capt_trajectory(X = X, doPrint=False, t_0 = t_0)
@@ -507,13 +494,15 @@ class CAPT:
         
         Parameters
         ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
         clip : boolean
             Determines wheter to limit the acceleration to the interval
             [-max_accel, max_accel]
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x 2)
         
         """
         complete_velocity = self.compute_velocity(X = X, t_0 = t_0)
@@ -534,7 +523,7 @@ class CAPT:
         
         return accel
     
-    def simulated_trajectory(self, n_samples, n_agents, max_accel, X_0, doPrint = True):
+    def simulated_trajectory(self, max_accel, X_0, doPrint = True):
         """ 
         Calculates trajectory using the calculated acceleration. This function
         is particularly useful when clip is set to True in 
@@ -543,14 +532,21 @@ class CAPT:
         
         Parameters
         ----------
-        N/A
+        max_accel : double
+            Maximum acceleration allowed
+        X_0 : np.array (n_samples x n_agents x 2) 
+            Initial positions of the agents for all samples
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x n_agents x 2)
+        np.array (n_samples x t_samples x n_agents x 2)
         
         """
+
+        n_samples = X_0.shape[0]
         t_samples = int(self.t_f / 0.1)
+        n_agents = X_0.shape[1]
+
         
         accel = self.compute_acceleration(X = None, clip=True, t_0 = 0)
         
@@ -564,6 +560,7 @@ class CAPT:
                         n_agents, 
                         2))
         
+
         pos[:, 0, :, :] = X_0
         
         if (doPrint):
@@ -611,23 +608,28 @@ class CAPT:
         The state is a matrix with contents [X_agent, X_closest, G_closest],
         where X_agent is the position of the agent itself, X_closest is the
         position of the n_degree closest agents and G_closest is the position
-        of the n_degree closest goals.
+        of the n_degree closest goals. Each state, therefore, has 2(2*self.degree + 1) elements
         
         Parameters
         ----------
-        doPrint : boolean
-            whether to print progress or not.
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
+        comm_graph : np.array (n_samples x t_samples x n_agents x n_agents)
+            communication graph (adjacency matrix)
+        degree : int
+            number of edges allowed per node
         
         Returns
         -------
-        np.array (n_samples x (t_f / 0.1) x (2 * self.degree + 10 x n_agents x 2)
+        np.array (n_samples x t_samples x (2 * (2*self.degree + 1)) x n_agents)
         
         """
         
         n_samples = X.shape[0]
         t_samples = X.shape[1]
         n_agents = X.shape[2]
-
 
         if (doPrint):
             print('\tComputing states...', end = ' ', flush = True)
@@ -680,7 +682,7 @@ class CAPT:
             
         return state
     
-    def evaluate(self, R):
+    def evaluate(self, X, G, R):
         """ 
         Computes the total cost of the trajectory averaged over all samples. 
         The cost is associated with the number of goals with no agent located
@@ -688,6 +690,10 @@ class CAPT:
         
         Parameters
         ----------
+        X : np.array (n_samples x t_samples, n_agents x 2) 
+            positions of the agents for all samples for all times t
+        G : np.array (n_samples x n_agents x 2) 
+            goal positions of the agents for all samples
         R : double
             tolerance regarding goal-agent distance
         
@@ -696,11 +702,12 @@ class CAPT:
         double
         
         """
-        final_pos = self.X[:,-1, :, :]
-        goals = self.G
+        final_pos = X[:,-1, :, :]
+        n_samples = X.shape[0]
+        goals = G
         mean_cost = 0
         
-        for sample in range(0, self.n_samples):
+        for sample in range(0, n_samples):
             # Calculate distance
             distance_matrix = cdist(final_pos[sample, :, :], goals[sample, :, :])
             
@@ -801,7 +808,6 @@ print('Starting...')
 sample = 0 # sample to graph    
 
 capt = CAPT(n_agents = 30, 
-            comm_radius=6, 
             min_dist=2, 
             n_samples=1, 
             t_f = 10, 
