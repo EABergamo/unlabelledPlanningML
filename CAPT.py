@@ -236,6 +236,10 @@ class CAPT(_data):
             
         # Time samples per sample (where 0.1 is the sampling time)    
         self.t_samples = int(self.t_f / 0.1)
+
+        print('Starting...')
+        start = timeit.default_timer()
+
         
         # Defining initial positions for agents
         self.X_0_all = self.compute_agents_initial_positions(self.n_agents, 
@@ -308,6 +312,10 @@ class CAPT(_data):
         self.comm_graph['test'] = self.comm_graph_all[startSample:endSample]
         self.state['test'] = self.state_all[startSample:endSample]
     
+
+        stop = timeit.default_timer()
+        print('Total time: ', stop - start, 's')
+        
     def compute_agents_initial_positions(self, n_agents, n_samples, comm_radius,
                                         min_dist = 0.1, doPrint= True, **kwargs):
         """ 
@@ -1021,53 +1029,48 @@ class CAPT(_data):
                     thisData = np.expand_dims(thisData, axis = 0)
 
         return thisData
-        
 
-start = timeit.default_timer()
-print('Starting...')
 
-sample = 0 # sample to graph    
+
+##########
+# Driver #
+##########
 
 capt = CAPT(n_agents = 50,
-            min_dist = 2, 
-            t_f = 15, 
+            min_dist = 0.5, 
+            t_f = 10, 
             max_accel = 5,
             degree = 5,
             n_train = 1, 
             n_valid = 0, 
             n_test = 0)
-# Plotting
-pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
-
-for t in range(0, pos.shape[1]):
-    plt.scatter(pos[sample, t, :, 0], 
-                pos[sample, t, :, 1], 
-                marker='.', 
-                color='gray',
-                label='',
-                s=0.8, linewidths=0.2)
-
-plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
-                label="goal", marker='x', color='r')
-
-plt.scatter(pos[sample, 0, :, 0], 
-            pos[sample, 0, :, 1], 
-            marker='o', 
-            color='red',
-            label='start')
-
-plt.grid()    
-plt.title('Trajectories')
-plt.legend()
-#plt.show()
-#plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
 
 
-stop = timeit.default_timer()
 
-print(capt.evaluate(pos, capt.G_all, 0.5))
+# Plotting (uncomment to visualize trajectory)
 
-print()
-print('Total time: ', stop - start, 's')
+# sample = 0
+# pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
 
+# for t in range(0, pos.shape[1]):
+#     plt.scatter(pos[sample, t, :, 0], 
+#                 pos[sample, t, :, 1], 
+#                 marker='.', 
+#                 color='gray',
+#                 label='',
+#                 s=0.8, linewidths=0.2)
 
+# plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
+#                 label="goal", marker='x', color='r')
+
+# plt.scatter(pos[sample, 0, :, 0], 
+#             pos[sample, 0, :, 1], 
+#             marker='o', 
+#             color='red',
+#             label='start')
+
+# plt.grid()    
+# plt.title('Trajectories')
+# plt.legend()
+# plt.show()
+# #plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
