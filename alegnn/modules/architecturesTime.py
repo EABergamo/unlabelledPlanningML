@@ -170,8 +170,7 @@ class LocalGNN_DB(nn.Module):
         # so we finally have the architecture.
 
     def splitForward(self, x, S):
-
-        
+              
         # Check the dimensions of the input
         #   S: B x T (x E) x N x N
         #   x: B x T x F[0] x N

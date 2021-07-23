@@ -308,6 +308,8 @@ class CAPT(_data):
         # Compute the states for the entire dataset
         self.state_all = self.compute_state(self.pos_all, self.G_all, self.comm_graph_all, self.degree)
 
+        print('!!!!!', self.pos_all.shape)
+
  
         # Separate the states into training, validation and testing samples
         # and save them
@@ -681,7 +683,6 @@ class CAPT(_data):
         
         G = self.G_all
         
-        
         if (doPrint):
             print('\tComputing CAPT trajectories...', end = ' ', flush = True)
         
@@ -882,7 +883,6 @@ class CAPT(_data):
         
         for sample in range(0, n_samples):
             for t in np.arange(1, t_samples):
-        
                 if (t % 25 == 0):
                     if (not useArchit):
                         new_vel = self.compute_velocity(X = pos, t_0 = t)[sample, 1, :, :]
@@ -1131,14 +1131,16 @@ class CAPT(_data):
 # Driver #
 ##########
 
-capt = CAPT(n_agents = 50,
-            min_dist = 0.5, 
-            t_f = 10, 
-            max_accel = 5,
-            degree = 5,
-            nTrain = 1, 
-            nValid = 1, 
-            nTest = 1)
+
+# print('test')
+# capt = CAPT(n_agents = 50,
+#             min_dist = 0.5, 
+#             nTrain=100,
+#             nTest=100,
+#             nValid=100,
+#             t_f = 10, 
+#             max_accel = 5,
+#             degree = 5,)
 
 # with open('filename.pickle', 'wb') as handle:
 #     pickle.dump(capt, handle, protocol=pickle.HIGHEST_PROTOCOL)

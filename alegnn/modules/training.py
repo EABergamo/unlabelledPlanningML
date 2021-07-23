@@ -228,15 +228,19 @@ class Trainer:
     def trainBatch(self, thisBatchIndices):
         
         # Get the samples
-        xTrain, yTrain = self.data.getSamples('train', thisBatchIndices)
-        xTrain = xTrain.to(self.model.device)
-        Strain = self.data.getData('commGraph', 'train')
+        xTrainAll, yTrainAll = self.data.getSamples('train')
+        xTrainAll = xTrainAll.to(self.model.device)
+        StrainAll = self.data.getData('commGraph', 'train')
 
-        xTrain = xTrain.to(self.model.device)
-        yTrain = yTrain.to(self.model.device)
-        Strain = Strain.to(self.model.device)
+        xTrainAll = xTrainAll.to(self.model.device)
+        yTrainAll = yTrainAll.to(self.model.device)
+        StrainAll = StrainAll.to(self.model.device)
 
-        print(xTrain.shape)
+        # Get the samples
+        xTrain = xTrainAll[thisBatchIndices]
+        yTrain = yTrainAll[thisBatchIndices]
+        Strain = StrainAll[thisBatchIndices]
+        
         # Start measuring time
         startTime = datetime.datetime.now()
 
@@ -266,14 +270,12 @@ class Trainer:
         #   gradient operation is taken into account here.
         #   (Alternatively, we could use a with torch.no_grad():)
 
+        goalsTrain = self.data.getData('goals', 'train')
+        initPosTrain = self.data.getData('initPos', 'train')
 
-        goalsValid = self.data.getData('goals', 'valid')
-        initPosValid = self.data.getData('initPos', 'valid')
+        yHatTrain, _, _ = self.data.simulated_trajectory(initPosTrain, doPrint = False, archit = self.model.archit)
 
-        yHatTrain, _, _ = self.data.simulated_trajectory(initPosValid, doPrint = False, archit = self.model.archit)
-        print(yHatTrain.shape)
-
-        costTrain = self.data.evaluate(yHatTrain, goalsValid)
+        costTrain = self.data.evaluate(yHatTrain, goalsTrain)
         
         return lossValueTrain.item(), costTrain.item(), timeElapsed
     
@@ -281,8 +283,12 @@ class Trainer:
         
         # Validation:
         xValid, yValid = self.data.getSamples('valid')
+        Svalid = self.data.getData('commGraph', 'valid')
+
         xValid = xValid.to(self.model.device)
         yValid = yValid.to(self.model.device)
+        Svalid = Svalid.to(self.model.device)
+        
 
         # Start measuring time
         startTime = datetime.datetime.now()
@@ -292,7 +298,7 @@ class Trainer:
         # account to update the learnable parameters.
         with torch.no_grad():
             # Obtain the output of the GNN
-            yHatValid = self.model.archit(xValid)
+            yHatValid = self.model.archit(xValid, Svalid)
 
             # Compute loss
             lossValueValid = self.model.loss(yHatValid, yValid)
@@ -303,7 +309,12 @@ class Trainer:
             timeElapsed = abs(endTime - startTime).total_seconds()
 
             # Compute accuracy:
-            costValid = self.data.evaluate(yHatValid, yValid)
+            goalsValid = self.data.getData('goals', 'valid')
+            initPosValid = self.data.getData('initPos', 'valid')
+
+            yHatTest, _, _ = self.data.simulated_trajectory(initPosValid, doPrint = False, archit = self.model.archit)
+
+            costValid = self.data.evaluate(yHatTest, goalsValid)
         
         return lossValueValid.item(), costValid.item(), timeElapsed
         

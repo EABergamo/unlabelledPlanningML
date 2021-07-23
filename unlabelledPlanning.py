@@ -91,10 +91,10 @@ nSimPoints = 1 # Number of simulations between nAgents and nAgentsMax
     # then the architectures are trained on 50, 75 and 100 agents.
 commRadius = 2. # Communication radius
 repelDist = 1. # Minimum distance before activating repelling potential
-nTrain = 1 # Number of training samples
-nValid = 1 # Number of valid samples
-nTest = 1 # Number of testing samples
-duration = 2. # Duration of the trajectory
+nTrain = 400 # Number of training samples
+nValid = 20 # Number of valid samples
+nTest = 20 # Number of testing samples
+duration = 8 # Duration of the trajectory
 samplingTime = 0.01 # Sampling time
 initGeometry = 'circular' # Geometry of initial positions
 initVelValue = 3. # Initial velocities are samples from an interval
@@ -433,6 +433,8 @@ for realization in range(nRealizations):
         print("...", flush = True)
 
     #   Generate the dataset
+
+    print(nTrain)
     data = CAPT.CAPT(nAgents, initMinDist, nTrain, nValid, nTest, t_f=duration, max_accel=accelMax, degree=degree)
 
     #%%##################################################################
@@ -452,7 +454,7 @@ for realization in range(nRealizations):
 
     for thisModel in modelList:
 
-        # Get the corresponding parameter dictionary
+        #  the corresponding parameter dictionary
         hParamsDict = deepcopy(eval('hParams' + thisModel))
         # and training options
         trainingOptsPerModel[thisModel] = deepcopy(trainingOptions)
@@ -581,3 +583,5 @@ for realization in range(nRealizations):
     # And we also need to save 'nBatch' but is the same for all models, so
     if doFigs:
         nBatches = thisTrainVars['nBatches']     
+
+
