@@ -493,34 +493,48 @@ class CAPT(_data):
         np.array (n_samples x n_goals x 2) 
         """
 
+        
         n_samples = X_0.shape[0]
         n_goals = X_0.shape[1]
+
+        goal_position = np.zeros((n_samples, n_goals, 2))
+
+
+        for sample in range(0, n_samples):
+            for goal in range(0, n_goals):
+                x_0 = X_0[sample, goal, 0]
+                y_0 = X_0[sample, goal, 1]
+                radius = np.random.uniform(0, 1)
+                phi = np.random.uniform(0, 2*np.math.pi)
+                goal_position[sample, goal] = np.array([radius * np.math.cos(phi) + x_0, radius * np.math.sin(phi) + y_0])
+
+
         
-        # Find max/min positions
-        x_min = np.min(X_0[0, :, 0])
-        y_min = np.min(X_0[0, :, 1])
-        x_max = np.max(X_0[0, :, 0])
-        y_max = np.max(X_0[0, :, 1])
+        # # Find max/min positions
+        # x_min = np.min(X_0[0, :, 0])
+        # y_min = np.min(X_0[0, :, 1])
+        # x_max = np.max(X_0[0, :, 0])
+        # y_max = np.max(X_0[0, :, 1])
       
-        # Samples uniform distribution
-        x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
-        y = np.random.uniform(low = y_min, high = y_max, size=n_goals)
+        # # Samples uniform distribution
+        # x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
+        # y = np.random.uniform(low = y_min, high = y_max, size=n_goals)
       
         
-        # Creates goals array
-        goals = np.stack((x, y), axis=1)  
-        goals = np.repeat(np.expand_dims(goals, 0), n_samples, axis = 0)
+        # # Creates goals array
+        # goals = np.stack((x, y), axis=1)  
+        # goals = np.repeat(np.expand_dims(goals, 0), n_samples, axis = 0)
         
-        dist_pertub = (min_dist)/(4.*np.sqrt(2))
+        # dist_pertub = (min_dist)/(4.*np.sqrt(2))
         
-        # Now generate the noise
-        pertubation = np.random.uniform(low = -dist_pertub,
-                                        high = dist_pertub,
-                                        size = (n_samples, n_goals,  2))
+        # # Now generate the noise
+        # pertubation = np.random.uniform(low = -dist_pertub,
+        #                                 high = dist_pertub,
+        #                                 size = (n_samples, n_goals,  2))
         
-        goals = goals + pertubation
+        # goals = goals + pertubation
       
-        return goals
+        return goal_position
     
     def compute_assignment_matrix(self, X_0, G, doPrint = True):
         """ 
@@ -970,11 +984,11 @@ class CAPT(_data):
                         closest_goals_index = np.argpartition(distance_to_goals, degree)[0:degree]
                         
                         # TODO: relative or absolute position?
-                        distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
-                        state[sample, t, -degree * 2:, agent] = distance_to_closest.flatten()
+                        # distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
+                        # state[sample, t, -degree * 2:, agent] = distance_to_closest.flatten()
                         
                         # Goals
-                        #state[sample, t, -degree * 2:, agent] = goals[closest_goals_index].flatten()
+                        state[sample, t, -degree * 2:, agent] = goals[closest_goals_index].flatten()
                         
                         # Own positions  
                         state[sample, t, 0:2, agent] = X[sample, t, agent,:].flatten()
@@ -1133,23 +1147,23 @@ class CAPT(_data):
 
 
 # print('test')
-# capt = CAPT(n_agents = 5,
+# capt = CAPT(n_agents = 10,
 #             min_dist = 0.5, 
-#             nTrain=10,
-#             nTest=0,
-#             nValid=0,
-#             t_f = 5, 
-#             max_accel = 5,
+#             nTrain=1000,
+#             nTest=30,
+#             nValid=30,
+#             t_f = 3, 
+#             max_accel = 10,
 #             degree = 3,)
 
-# with open('filename.pickle', 'wb') as handle:
+# with open('dataset.pickle', 'wb') as handle:
 #     pickle.dump(capt, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 
 # # Plotting (uncomment to visualize trajectory)
 
-# sample = 3
+# sample = 5
 # pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
 
 # print(capt.evaluate(pos, capt.G_all))
