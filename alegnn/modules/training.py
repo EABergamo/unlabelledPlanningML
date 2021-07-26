@@ -228,19 +228,10 @@ class Trainer:
     def trainBatch(self, thisBatchIndices):
         
         # Get the samples
-        xTrainAll, yTrainAll = self.data.getSamples('train')
-        xTrainAll = xTrainAll.to(self.model.device)
-        StrainAll = self.data.getData('commGraph', 'train')
+        xTrain, yTrain = self.data.getSamples('train', thisBatchIndices)
+        xTrain = xTrain.to(self.model.device)
+        yTrain = yTrain.to(self.model.device)
 
-        xTrainAll = xTrainAll.to(self.model.device)
-        yTrainAll = yTrainAll.to(self.model.device)
-        StrainAll = StrainAll.to(self.model.device)
-
-        # Get the samples
-        xTrain = xTrainAll[thisBatchIndices]
-        yTrain = yTrainAll[thisBatchIndices]
-        Strain = StrainAll[thisBatchIndices]
-        
         # Start measuring time
         startTime = datetime.datetime.now()
 
@@ -248,7 +239,7 @@ class Trainer:
         self.model.archit.zero_grad()
 
         # Obtain the output of the GNN
-        yHatTrain = self.model.archit(xTrain, Strain)
+        yHatTrain = self.model.archit(xTrain)
 
         # Compute loss
         lossValueTrain = self.model.loss(yHatTrain, yTrain)
@@ -269,13 +260,7 @@ class Trainer:
         #   same value, but detaches it from the gradient, so that no
         #   gradient operation is taken into account here.
         #   (Alternatively, we could use a with torch.no_grad():)
-
-        goalsTrain = self.data.getData('goals', 'train')
-        initPosTrain = self.data.getData('initPos', 'train')
-
-        yHatTrain, _, _ = self.data.simulated_trajectory(initPosTrain, doPrint = False, archit = self.model.archit)
-
-        costTrain = self.data.evaluate(yHatTrain, goalsTrain)
+        costTrain = self.data.evaluate(yHatTrain.data, yTrain)
         
         return lossValueTrain.item(), costTrain.item(), timeElapsed
     
@@ -283,12 +268,8 @@ class Trainer:
         
         # Validation:
         xValid, yValid = self.data.getSamples('valid')
-        Svalid = self.data.getData('commGraph', 'valid')
-
         xValid = xValid.to(self.model.device)
         yValid = yValid.to(self.model.device)
-        Svalid = Svalid.to(self.model.device)
-        
 
         # Start measuring time
         startTime = datetime.datetime.now()
@@ -298,7 +279,7 @@ class Trainer:
         # account to update the learnable parameters.
         with torch.no_grad():
             # Obtain the output of the GNN
-            yHatValid = self.model.archit(xValid, Svalid)
+            yHatValid = self.model.archit(xValid)
 
             # Compute loss
             lossValueValid = self.model.loss(yHatValid, yValid)
@@ -309,12 +290,7 @@ class Trainer:
             timeElapsed = abs(endTime - startTime).total_seconds()
 
             # Compute accuracy:
-            goalsValid = self.data.getData('goals', 'valid')
-            initPosValid = self.data.getData('initPos', 'valid')
-
-            yHatTest, _, _ = self.data.simulated_trajectory(initPosValid, doPrint = False, archit = self.model.archit)
-
-            costValid = self.data.evaluate(yHatTest, goalsValid)
+            costValid = self.data.evaluate(yHatValid, yValid)
         
         return lossValueValid.item(), costValid.item(), timeElapsed
         
@@ -670,15 +646,10 @@ class TrainerSingleNode(Trainer):
         
         # Get the samples
         xTrain, yTrain = self.data.getSamples('train', thisBatchIndices)
-        Strain = self.data.getData('commGraph', 'train')
         xTrain = xTrain.to(self.model.device)
         yTrain = yTrain.to(self.model.device)
-        Strain = Strain.to(self.model.device)
-
         targetIDs = self.data.getLabelID('train', thisBatchIndices)
 
-
-        
         # Start measuring time
         startTime = datetime.datetime.now()
 
@@ -741,7 +712,308 @@ class TrainerSingleNode(Trainer):
             costValid = self.data.evaluate(yHatValid, yValid)
         
         return lossValueValid.item(), costValid.item(), timeElapsed
+
+class TrainerUnlabelledPlanning(Trainer):
+    def __init__(self, model, data, nEpochs, batchSize, **kwargs):
         
+        # Initialize supraclass
+        super().__init__(model, data, nEpochs, batchSize, **kwargs)
+    
+    def train(self):
+        # Get back the training options
+        assert 'trainingOptions' in dir(self)
+        assert 'doLogging' in self.trainingOptions.keys()
+        doLogging = self.trainingOptions['doLogging']
+        assert 'logger' in self.trainingOptions.keys()
+        logger = self.trainingOptions['logger']
+        assert 'doSaveVars' in self.trainingOptions.keys()
+        doSaveVars = self.trainingOptions['doSaveVars']
+        assert 'doPrint' in self.trainingOptions.keys()
+        doPrint = self.trainingOptions['doPrint']
+        assert 'printInterval' in self.trainingOptions.keys()
+        printInterval = self.trainingOptions['printInterval']
+        assert 'doLearningRateDecay' in self.trainingOptions.keys()
+        doLearningRateDecay = self.trainingOptions['doLearningRateDecay']
+        if doLearningRateDecay:
+            assert 'learningRateDecayRate' in self.trainingOptions.keys()
+            learningRateDecayRate=self.trainingOptions['learningRateDecayRate']
+            assert 'learningRateDecayPeriod' in self.trainingOptions.keys()
+            learningRateDecayPeriod=self.trainingOptions['learningRateDecayPeriod']
+        assert 'validationInterval' in self.trainingOptions.keys()
+        validationInterval = self.trainingOptions['validationInterval']
+        assert 'doEarlyStopping' in self.trainingOptions.keys()
+        doEarlyStopping = self.trainingOptions['doEarlyStopping']
+        assert 'earlyStoppingLag' in self.trainingOptions.keys()
+        earlyStoppingLag = self.trainingOptions['earlyStoppingLag']
+        assert 'batchIndex' in self.trainingOptions.keys()
+        batchIndex = self.trainingOptions['batchIndex']
+        assert 'batchSize' in self.trainingOptions.keys()
+        batchSize = self.trainingOptions['batchSize']
+        assert 'nEpochs' in self.trainingOptions.keys()
+        nEpochs = self.trainingOptions['nEpochs']
+        assert 'nBatches' in self.trainingOptions.keys()
+        nBatches = self.trainingOptions['nBatches']
+        assert 'graphNo' in self.trainingOptions.keys()
+        graphNo = self.trainingOptions['graphNo']
+        assert 'realizationNo' in self.trainingOptions.keys()
+        realizationNo = self.trainingOptions['realizationNo']
+
+        # Get the values we need
+        nTrain = self.data.nTrain
+        thisArchit = self.model.archit
+        thisLoss = self.model.loss
+        thisOptim = self.model.optim
+        thisDevice = self.model.device
+
+        # Initialize counters (since we give the possibility of early stopping,
+        # we had to drop the 'for' and use a 'while' instead):
+        epoch = 0 # epoch counter
+
+        if doSaveVars:
+            lossTrain = []
+            evalValid = []
+            timeTrain = []
+            timeValid = []
+
+        # Get original dataset
+        xTrainOrig, yTrainOrig = self.data.getSamples('train')
+        StrainOrig = self.data.getData('commGraph', 'train')
+
+        # And save it as the original "all samples"
+        xTrainAll = xTrainOrig
+        yTrainAll = yTrainOrig
+        StrainAll = StrainOrig
+        
+        while epoch < nEpochs:
+                        # The condition will be zero (stop), whenever one of the items of
+            # the 'and' is zero. Therefore, we want this to stop only for epoch
+            # counting when we are NOT doing early stopping. This can be
+            # achieved if the second element of the 'and' is always 1 (so that
+            # the first element, the epoch counting, decides). In order to
+            # force the second element to be one whenever there is not early
+            # stopping, we have an or, and force it to one. So, when we are not
+            # doing early stopping, the variable 'not doEarlyStopping' is 1,
+            # and the result of the 'or' is 1 regardless of the lagCount. When
+            # we do early stopping, then the variable 'not doEarlyStopping' is
+            # 0, and the value 1 for the 'or' gate is determined by the lag
+            # count.
+            # ALTERNATIVELY, we could just keep 'and lagCount<earlyStoppingLag'
+            # and be sure that lagCount can only be increased whenever
+            # doEarlyStopping is True. But I somehow figured out that would be
+            # harder to maintain (more parts of the code to check if we are
+            # accidentally increasing lagCount).
+
+            # Randomize dataset for each epoch
+            randomPermutation = np.random.permutation(nTrain)
+
+            # Convert a numpy.array of numpy.int into a list of actual int.
+            idxEpoch = [int(i) for i in randomPermutation]
+
+            # Initialize counter
+            batch = 0 # batch counter
+            while batch < nBatches:
+                # Extract the adequate batch
+                thisBatchIndices = idxEpoch[batchIndex[batch]
+                                            : batchIndex[batch+1]]
+                # Get the samples
+                xTrain = xTrainAll[thisBatchIndices]
+                yTrain = yTrainAll[thisBatchIndices]
+                Strain = StrainAll[thisBatchIndices]
+
+                # Start measuring time
+                startTime = datetime.datetime.now()
+
+                # Reset gradients
+                thisArchit.zero_grad()
+
+                # Obtain the output of the GNN
+                yHatTrain = thisArchit(xTrain, Strain)
+
+                # Compute loss
+                lossValueTrain = thisLoss(yHatTrain, yTrain)
+
+                # Compute gradients
+                lossValueTrain.backward()
+
+                # Optimize
+                thisOptim.step()
+
+                # Finish measuring time
+                endTime = datetime.datetime.now()
+
+                timeElapsed = abs(endTime - startTime).total_seconds()
+
+                 # Print:
+                if doPrint and printInterval > 0:
+                    if (epoch * nBatches + batch) % printInterval == 0:
+                        print("\t(E: %2d, B: %3d) %7.4f - %6.4fs" % (
+                                epoch+1, batch+1,
+                                lossValueTrain.item(), timeElapsed),
+                            end = ' ')
+                        if graphNo > -1:
+                            print("[%d" % graphNo, end = '')
+                            if realizationNo > -1:
+                                print("/%d" % realizationNo,
+                                      end = '')
+                            print("]", end = '')
+                        print("")
+    
+                #\\\\\\\
+                #\\\ VALIDATION
+                #\\\\\\\
+
+                if (epoch * nBatches + batch) % validationInterval == 0:
+                    
+                    # Start measuring time
+                    startTime = datetime.datetime.now()
+                    
+                    # Create trajectories
+                    
+                    # Initial data
+                    initPosValid = self.data.getData('initPos','valid')
+                    goalValid = self.data.getData('goals', 'valid')
+                    
+                    # Compute trajectories
+                    posValid, _, _ = self.data.simulated_trajectory(initPosValid, doPrint=False, archit=thisArchit)
+                    
+                    # Compute evaluation
+                    accValid = self.data.evaluate(posValid, goalValid)
+
+                    # Finish measuring time
+                    endTime = datetime.datetime.now()
+
+                    timeElapsed = abs(endTime - startTime).total_seconds()
+
+                    # Logging values
+                    if doLogging:
+                        evalValidTB = accValid
+                    # Save values
+                    if doSaveVars:
+                        evalValid += [accValid]
+                        timeValid += [timeElapsed]
+
+                    # Print:
+                    if doPrint:
+                        print("\t(E: %2d, B: %3d) %8.4f - %6.4fs" % (
+                                epoch+1, batch+1,
+                                accValid, 
+                                timeElapsed), end = ' ')
+                        print("[VALIDATION", end = '')
+                        if graphNo > -1:
+                            print(".%d" % graphNo, end = '')
+                            if realizationNo > -1:
+                                print("/%d" % realizationNo, end = '')
+                        print(" (%s)]" % self.model.name)
+
+                    if doLogging:
+                        logger.scalar_summary(mode = 'Validation',
+                                          epoch = epoch * nBatches + batch,
+                                          **{'evalValid': evalValidTB})
+
+                    # No previous best option, so let's record the first trial
+                    # as the best option
+                    if epoch == 0 and batch == 0:
+                        bestScore = accValid
+                        bestEpoch, bestBatch = epoch, batch
+                        # Save this model as the best (so far)
+                        self.model.save(label = 'Best')
+                        # Start the counter
+                        if doEarlyStopping:
+                            initialBest = True
+                    else:
+                        thisValidScore = accValid
+                        if thisValidScore < bestScore:
+                            bestScore = thisValidScore
+                            bestEpoch, bestBatch = epoch, batch
+                            if doPrint:
+                                print("\t=> New best achieved: %.4f" % \
+                                          (bestScore))
+                            self.model.save(label = 'Best')
+                            # Now that we have found a best that is not the
+                            # initial one, we can start counting the lag (if
+                            # needed)
+                            initialBest = False
+                            # If we achieved a new best, then we need to reset
+                            # the lag count.
+                            if doEarlyStopping:
+                                lagCount = 0
+                        # If we didn't achieve a new best, increase the lag
+                        # count.
+                        # Unless it was the initial best, in which case we
+                        # haven't found any best yet, so we shouldn't be doing
+                        # the early stopping count.
+                        elif doEarlyStopping and not initialBest:
+                            lagCount += 1
+
+                    # Delete variables to free space in CUDA memory
+                    del initPosValid
+
+                #\\\\\\\
+                #\\\ END OF BATCH:
+                #\\\\\\\
+
+                #\\\ Increase batch count:
+                batch += 1
+
+            #\\\\\\\
+            #\\\ END OF EPOCH:
+            #\\\\\\\
+
+            #\\\ Increase epoch count:
+            epoch += 1
+        
+        #\\\ Save models:
+        self.model.save(label = 'Last')
+
+        #################
+        # TRAINING OVER #
+        #################
+
+        if doSaveVars:
+            # We convert the lists into np.arrays
+            lossTrain = np.array(lossTrain)
+            evalValid = np.array(evalValid)
+            # And we would like to save all the relevant information from
+            # training
+            trainVars = {'nEpochs': nEpochs,
+                     'nBatches': nBatches,
+                     'validationInterval': validationInterval,
+                     'batchSize': np.array(batchSize),
+                     'batchIndex': np.array(batchIndex),
+                     'bestBatch': bestBatch,
+                     'bestEpoch': bestEpoch,
+                     'bestScore': bestScore,
+                     'lossTrain': lossTrain,
+                     'timeTrain': timeTrain,
+                     'evalValid': evalValid,
+                     'timeValid': timeValid
+                     }
+            saveDirVars = os.path.join(self.model.saveDir, 'trainVars')
+            if not os.path.exists(saveDirVars):
+                os.makedirs(saveDirVars)
+            pathToFile = os.path.join(saveDirVars,self.model.name + 'trainVars.pkl')
+            with open(pathToFile, 'wb') as trainVarsFile:
+                pickle.dump(trainVars, trainVarsFile)
+
+        # Now, if we didn't do any training (i.e. nEpochs = 0), then the last is
+        # also the best.
+        if nEpochs == 0:
+            self.model.save(label = 'Best')
+            self.model.save(label = 'Last')
+            if doPrint:
+                print("\nWARNING: No training. Best and Last models are the same.\n")
+
+        # After training is done, reload best model before proceeding to
+        # evaluation:
+        self.model.load(label = 'Best')
+
+        #\\\ Print out best:
+        if doPrint and nEpochs > 0:
+            print("\t=> Best validation achieved (E: %d, B: %d): %.4f" % (
+                    bestEpoch + 1, bestBatch + 1, bestScore))
+
+        return trainVars
+
 class TrainerFlocking(Trainer):
     """
     Trainer: trains flocking models, following the appropriate evaluation of
@@ -1191,7 +1463,7 @@ class TrainerFlocking(Trainer):
                             initialBest = True
                     else:
                         thisValidScore = accValid
-                        if thisValidScore < bestScore:
+                        if thisValidScore > bestScore:
                             bestScore = thisValidScore
                             bestEpoch, bestBatch = epoch, batch
                             if doPrint:

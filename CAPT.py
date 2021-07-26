@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from numpy.core.function_base import _needs_add_docstring
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 import utils
@@ -265,7 +266,7 @@ class CAPT(_data):
         self.nTrain, self.nValid, self.nTest =  nTrain, nValid, nTest
         self.n_samples = nTrain + nValid + nTest # number of samples
         self.dataType = np.float64
-        self.R = 0.25
+        self.R = 0.5
 
         
         # Max allowed velocity
@@ -276,7 +277,7 @@ class CAPT(_data):
         
         # Simulation duration
         if (t_f is None):
-            self.t_f = 10 / max_vel
+            self.t_f = 10 / self.max_vel
         else:
             self.t_f = t_f
             
@@ -307,9 +308,6 @@ class CAPT(_data):
 
         # Compute the states for the entire dataset
         self.state_all = self.compute_state(self.pos_all, self.G_all, self.comm_graph_all, self.degree)
-
-        print('!!!!!', self.pos_all.shape)
-
  
         # Separate the states into training, validation and testing samples
         # and save them
@@ -499,10 +497,10 @@ class CAPT(_data):
         n_goals = X_0.shape[1]
         
         # Find max/min positions
-        x_min = np.min(X_0[0, :, 0]) - 5
-        y_min = np.min(X_0[0, :, 1]) - 5
-        x_max = np.max(X_0[0, :, 0]) + 5
-        y_max = np.max(X_0[0, :, 1]) + 5
+        x_min = np.min(X_0[0, :, 0])
+        y_min = np.min(X_0[0, :, 1])
+        x_max = np.max(X_0[0, :, 0])
+        y_max = np.max(X_0[0, :, 1])
       
         # Samples uniform distribution
         x = np.random.uniform(low = x_min, high = x_max, size=n_goals)
@@ -742,13 +740,11 @@ class CAPT(_data):
         if (doPrint):
             print('\tComputing communication graph...', end = ' ', flush = True)
         
-        for sample in range(0, self.n_samples):
-            for t in range(0, self.t_samples):
+        for sample in range(0, n_samples):
+            for t in range(0, t_samples):
                 neigh = NearestNeighbors(n_neighbors=degree)
                 neigh.fit(X[sample, t, :, :])
                 graphMatrix[sample, t, :, :] = np.array(neigh.kneighbors_graph(mode='connectivity').todense())    
-        
-        
         
             if (doPrint):
                 percentageCount = int(100 * sample + 1) / self.n_samples
@@ -858,69 +854,72 @@ class CAPT(_data):
         n_agents = X_0.shape[1]
         max_accel = self.max_accel
         
-        if archit == None:
-            accel = self.compute_acceleration(X = None, clip=True, t_0 = 0)
-            useArchit = False
-        else:
-            accel = np.zeros((n_samples, t_samples, n_agents, 2))
-            useArchit = True
-        
-        vel = np.zeros((n_samples, 
+       
+        vel_all = np.zeros((n_samples, 
                         t_samples, 
                         n_agents, 
                         2))
         
-        pos = np.zeros((n_samples, 
+        pos_all = np.zeros((n_samples, 
                         t_samples, 
                         n_agents, 
                         2))
         
+        pos_all[:, 0, :, :] = X_0
 
-        pos[:, 0, :, :] = X_0
+         # If there is no architecture, we use CAPT. Else, we use the GNN.
+        if archit == None:
+            accel_all = self.compute_acceleration(X = None, clip=True, t_0 = 0)
+            use_archit = False
+        else:
+            accel_all = np.zeros((n_samples, t_samples, n_agents, 2))
+            graph_all = np.zeros((n_samples, t_samples, n_agents, n_agents))
+            state_all = np.zeros((n_samples, t_samples, 2 *(2*self.degree + 1), n_agents))
+            use_archit = True
         
         if (doPrint):
             print('\tComputing simulated trajectories...', end = ' ', flush = True)
         
-        for sample in range(0, n_samples):
-            for t in np.arange(1, t_samples):
+        for t in np.arange(1, t_samples):
+            if (not use_archit):
                 if (t % 25 == 0):
-                    if (not useArchit):
-                        new_vel = self.compute_velocity(X = pos, t_0 = t)[sample, 1, :, :]
-                        new_accel = (new_vel - vel[sample, t-1, :, :]) / 0.1
-                    else:
-                        comm_graph = self.compute_communication_graph(pos[:, 0:t, :, :], self.degree)
-                        state = self.compute_state(pos[:, 0:t, :, :], self.G, commGraph=comm_graph, doPrint=False)
-                        
-                        with torch.no_grad():
-                            new_accel = archit(state, comm_graph)
+                    # CAPT
+                    new_vel = self.compute_velocity(X = pos_all, t_0 = t)[:, 1, :, :]
+                    new_accel = (new_vel - vel_all[:, t-1, :, :]) / 0.1
+                    accel_all[:, t-1, :, :] = np.clip(new_accel, -max_accel, max_accel)
+            else:
+                if (t % 10 == 0 or t == 0):
+                    # GNN output
+                    curr_pos = np.expand_dims(pos_all[:, t-1, :, :], 1)
 
-                    accel[sample, t-1, :, :] = np.clip(new_accel, -max_accel, max_accel)
+                    curr_comm_graph = self.compute_communication_graph(curr_pos, self.degree, doPrint=False)
+                    curr_state = self.compute_state(curr_pos, self.G_all, commGraph=curr_comm_graph, degree=self.degree, doPrint=False)
+                    graph_all[:, t-1, :, :] = curr_comm_graph.squeeze(1)
+                    state_all[:, t-1, :, :] = curr_state.squeeze(1)
+
+                    x = torch.tensor(state_all[:, 0:t, :, :])
+                    S = torch.tensor(graph_all[:, 0:t, :, :]) 
+
+                    with torch.no_grad():
+                        new_accel = archit(x, S)
+                        new_accel = new_accel.numpy()
+                        new_accel = np.transpose(np.clip(new_accel, -max_accel, max_accel), (0, 1, 3, 2))
                     
-                vel[sample, t, :, :] = vel[sample, t - 1, :, :] \
-                         + accel[sample, t-1, :, :] * 0.1 
-                         
-                pos[sample, t, :, :] = pos[sample, t - 1, :, :] \
-                    + vel[sample, t - 1, :, :] * 0.1 \
-                    + accel[sample, t - 1, :, :] * 0.1**2 / 2
-                    
-            if (doPrint):
-                percentageCount = int(100 * sample + 1) / n_samples
-                if sample == 0:
-                    # It's the first one, so just print it
-                    print("%3d%%" % percentageCount,
-                          end = '', flush = True)
-                else:
-                    # Erase the previous characters
-                    print('\b \b' * 4 + "%3d%%" % percentageCount,
-                          end = '', flush = True)
+                    accel_all[:, t-1, :, :] = new_accel[:, -1, :, :]
+                
+            vel_all[:, t, :, :] = vel_all[:, t - 1, :, :] \
+                        + accel_all[:, t-1, :, :] * 0.1 
+                        
+            pos_all[:, t, :, :] = pos_all[:, t - 1, :, :] \
+                + vel_all[:, t - 1, :, :] * 0.1 \
+                + accel_all[:, t - 1, :, :] * 0.1**2 / 2
             
         # Print
         if doPrint:
             # Erase the percentage
-            print('\b \b' * 4, end = '', flush = True)
             print("OK", flush = True)
             
-        return pos, vel, accel
+        return pos_all, vel_all, accel_all
     
     def compute_state(self, X, G, commGraph, degree, doPrint = True):
         """ 
@@ -971,10 +970,11 @@ class CAPT(_data):
                         closest_goals_index = np.argpartition(distance_to_goals, degree)[0:degree]
                         
                         # TODO: relative or absolute position?
-                        # distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
+                        distance_to_closest = np.tile(agents[agent], (self.degree, 1)) - goals[closest_goals_index]
+                        state[sample, t, -degree * 2:, agent] = distance_to_closest.flatten()
                         
                         # Goals
-                        state[sample, t, -degree * 2:, agent] = goals[closest_goals_index].flatten()
+                        #state[sample, t, -degree * 2:, agent] = goals[closest_goals_index].flatten()
                         
                         # Own positions  
                         state[sample, t, 0:2, agent] = X[sample, t, agent,:].flatten()
@@ -1047,7 +1047,7 @@ class CAPT(_data):
             # Running (iterative) average
             mean_cost = mean_cost + (1 / (sample*t_samples + 1)) * (curr_cost - mean_cost)
             
-        return -mean_cost
+        return mean_cost
     
     def getData(self, name, samplesType, *args):
         """ 
@@ -1133,32 +1133,33 @@ class CAPT(_data):
 
 
 # print('test')
-# capt = CAPT(n_agents = 50,
+# capt = CAPT(n_agents = 5,
 #             min_dist = 0.5, 
-#             nTrain=100,
-#             nTest=100,
-#             nValid=100,
-#             t_f = 10, 
+#             nTrain=10,
+#             nTest=0,
+#             nValid=0,
+#             t_f = 5, 
 #             max_accel = 5,
-#             degree = 5,)
+#             degree = 3,)
 
 # with open('filename.pickle', 'wb') as handle:
 #     pickle.dump(capt, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 
-# Plotting (uncomment to visualize trajectory)
+# # Plotting (uncomment to visualize trajectory)
 
-# sample = 0
+# sample = 3
 # pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
+
+# print(capt.evaluate(pos, capt.G_all))
 
 # for t in range(0, pos.shape[1]):
 #     plt.scatter(pos[sample, t, :, 0], 
 #                 pos[sample, t, :, 1], 
 #                 marker='.', 
 #                 color='gray',
-#                 label='',
-#                 s=0.8, linewidths=0.2)
+#                 label='')
 
 # plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
 #                 label="goal", marker='x', color='r')
@@ -1169,8 +1170,13 @@ class CAPT(_data):
 #             color='red',
 #             label='start')
 
+# state = capt.state_all[0]
+# pos = capt.pos_all[0]
+# goals = capt.G_all[0]
+# accel = capt.accel_all[0]
+
 # plt.grid()    
 # plt.title('Trajectories')
 # plt.legend()
 # plt.show()
-# #plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
+# plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')

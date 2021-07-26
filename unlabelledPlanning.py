@@ -2,9 +2,9 @@ from CAPT import CAPT
 import os
 import numpy as np
 import matplotlib
-matplotlib.rcParams['text.usetex'] = True
-matplotlib.rcParams['font.family'] = 'serif'
-matplotlib.rcParams['text.latex.preamble']=[r'\usepackage{amsmath}']
+# matplotlib.rcParams['text.usetex'] = True
+# matplotlib.rcParams['font.family'] = 'serif'
+# matplotlib.rcParams['text.latex.preamble']=[r'\usepackage{amsmath}']
 import matplotlib.pyplot as plt
 import pickle
 import datetime
@@ -35,12 +35,13 @@ from alegnn.utils.miscTools import saveSeed
 
 thisFilename = 'flockingGNN' # This is the general name of all related files
 
-nAgents = 50 # Number of agents at training time
+nAgents = 15 # Number of agents at training time
 
 saveDirRoot = 'experiments' # In this case, relative location
 saveDir = os.path.join(saveDirRoot, thisFilename) # Dir where to save all
     # the results from each run
 
+print(saveDir)
 #\\\ Create .txt to store the values of the setting parameters for easier
 # reference when running multiple experiments
 today = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -91,16 +92,15 @@ nSimPoints = 1 # Number of simulations between nAgents and nAgentsMax
     # then the architectures are trained on 50, 75 and 100 agents.
 commRadius = 2. # Communication radius
 repelDist = 1. # Minimum distance before activating repelling potential
-nTrain = 400 # Number of training samples
-nValid = 20 # Number of valid samples
-nTest = 20 # Number of testing samples
-duration = 8 # Duration of the trajectory
-samplingTime = 0.01 # Sampling time
-initGeometry = 'circular' # Geometry of initial positions
-initVelValue = 3. # Initial velocities are samples from an interval
+nTrain = 750 # Number of training samples
+nValid = 30 # Number of valid samples
+nTest = 30 # Number of testing samples
+duration = 10 # Duration of the trajectory
+samplingTime = 0.1 # Sampling time
+initVelValue = 4. # Initial velocities are samples from an interval
     # [-initVelValue, initVelValue]
 initMinDist = 0.1 # No two agents are located at a distance less than this
-accelMax = 10. # This is the maximum value of acceleration allowed
+accelMax = 5. # This is the maximum value of acceleration allowed
 
 nRealizations = 1 # Number of data realizations
     # How many times we repeat the experiment
@@ -132,15 +132,15 @@ beta2 = 0.999 # ADAM option only
 lossFunction = nn.MSELoss
 
 #\\\ Training algorithm
-trainer = training.Trainer
+trainer = training.TrainerUnlabelledPlanning
 
 #\\\ Evaluation algorithm
-evaluator = evaluation.evaluateFlocking
+evaluator = evaluation.evaluate
 
 #\\\ Overall training options
 #probExpert = 0.993 # Probability of choosing the expert in DAGger
 #DAGgerType = 'fixedBatch' # 'replaceTimeBatch', 'randomEpoch'
-nEpochs = 30 # Number of epochs
+nEpochs = 50 # Number of epochs
 batchSize = 20 # Batch size
 doLearningRateDecay = False # Learning rate decay
 learningRateDecayRate = 0.9 # Rate
@@ -434,7 +434,6 @@ for realization in range(nRealizations):
 
     #   Generate the dataset
 
-    print(nTrain)
     data = CAPT.CAPT(nAgents, initMinDist, nTrain, nValid, nTest, t_f=duration, max_accel=accelMax, degree=degree)
 
     #%%##################################################################
