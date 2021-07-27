@@ -3,6 +3,7 @@ import torch
 
 zeroTolerance = 1e-9
 
+
 def changeDataType(x, dataType):
     """
     changeDataType(x, dataType): change the dataType of variable x into dataType
