@@ -115,8 +115,6 @@ class Model:
         saveFile = os.path.join(saveModelDir, self.name)
         torch.save(self.archit.state_dict(), saveFile+'Archit'+ label+'.ckpt')
         torch.save(self.optim.state_dict(), saveFile+'Optim'+label+'.ckpt')
-        print('Done!')
-        print(saveFile)
 
     def load(self, label = '', **kwargs):
         if 'loadFiles' in kwargs.keys():

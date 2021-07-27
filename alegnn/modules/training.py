@@ -774,6 +774,7 @@ class TrainerUnlabelledPlanning(Trainer):
             evalValid = []
             timeTrain = []
             timeValid = []
+            lossValid = []
 
         # Get original dataset
         xTrainOrig, yTrainOrig = self.data.getSamples('train')
@@ -843,6 +844,13 @@ class TrainerUnlabelledPlanning(Trainer):
 
                 timeElapsed = abs(endTime - startTime).total_seconds()
 
+                # Logging values
+                if doLogging:
+                    lossTrainTB = lossValueTrain
+                # Save values
+                lossTrain += [lossValueTrain]
+                timeTrain += [timeElapsed]
+
                  # Print:
                 if doPrint and printInterval > 0:
                     if (epoch * nBatches + batch) % printInterval == 0:
@@ -872,10 +880,20 @@ class TrainerUnlabelledPlanning(Trainer):
                     # Initial data
                     initPosValid = self.data.getData('initPos','valid')
                     goalValid = self.data.getData('goals', 'valid')
+                    xValid, yValid = self.data.getSamples('valid')
+                    Svalid = self.data.getData('commGraph', 'valid')
                     
                     # Compute trajectories
                     posValid, _, _ = self.data.simulated_trajectory(initPosValid, doPrint=False, archit=thisArchit)
                     
+
+                    with torch.no_grad():
+                        # Obtain the output of the GNN
+                        yHatValid = thisArchit(xValid, Svalid)
+                        # Compute loss
+                        lossValueTest = thisLoss(yHatValid, yValid)
+
+
                     # Compute evaluation
                     accValid = self.data.evaluate(posValid, goalValid)
 
@@ -891,6 +909,7 @@ class TrainerUnlabelledPlanning(Trainer):
                     if doSaveVars:
                         evalValid += [accValid]
                         timeValid += [timeElapsed]
+                        lossValid += [lossValueTest]
 
                     # Print:
                     if doPrint:
@@ -986,7 +1005,8 @@ class TrainerUnlabelledPlanning(Trainer):
                      'lossTrain': lossTrain,
                      'timeTrain': timeTrain,
                      'evalValid': evalValid,
-                     'timeValid': timeValid
+                     'timeValid': timeValid,
+                     'lossValid': lossValid
                      }
             saveDirVars = os.path.join(self.model.saveDir, 'trainVars')
             if not os.path.exists(saveDirVars):

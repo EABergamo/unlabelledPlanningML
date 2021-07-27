@@ -9,7 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 import alegnn.modules.architecturesTime as architTime
 
-def createTrainedLocalGNN(state_dic_location, dimNodeSignals = [2*(2*5 + 1), 64], nFilterTaps = [3], bias = True, 
+degree = 3
+def createTrainedLocalGNN(state_dic_location, dimNodeSignals = [2*(2*degree + 1), 64], nFilterTaps = [3], bias = True, 
     nonlinearity  = nn.Tanh, dimReadout = [2], dimEdgeFeatures = 1):
     """
     Method returns a LocalGNN given the path for the training hyperparameters. No other information is needed
@@ -22,7 +23,7 @@ def createTrainedLocalGNN(state_dic_location, dimNodeSignals = [2*(2*5 + 1), 64]
     return localGNN
 
 
-hyperparameters_path = ('/home/jcervino/summer-research/constrained-RL/experiments/flockingGNN-030-20210726151033/savedModels/LocalGNNArchitBest.ckpt') # Path to the hyperparameters
+hyperparameters_path = ('/home/jcervino/summer-research/constrained-RL/experiments/flockingGNN-015-20210727171842/savedModels/LocalGNNArchitBest.ckpt') # Path to the hyperparameters
 localGNN = createTrainedLocalGNN(torch.load(hyperparameters_path, map_location=torch.device('cpu'))) # Model object
 
 
@@ -33,7 +34,7 @@ n_valid = 1
 n_test = 1
 
 
-capt = CAPT.CAPT(n_agents, min_dist, n_train, n_valid, n_test, t_f = 8)
+capt = CAPT.CAPT(n_agents, min_dist, n_train, n_valid, n_test, t_f = 3, degree=degree)
 
 sample = 0
 pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all

@@ -82,7 +82,7 @@ saveSeed(randomStates, saveDir)
 
 useGPU = False # If true, and GPU is available, use it.
 
-degree = 5
+degree = 3
 nAgentsMax = nAgents # Maximum number of agents to test the solution
 nSimPoints = 1 # Number of simulations between nAgents and nAgentsMax
     # At test time, the architectures trained on nAgents will be tested on a
@@ -90,12 +90,12 @@ nSimPoints = 1 # Number of simulations between nAgents and nAgentsMax
     # the number of simulations for different number of agents is given by
     # nSimPoints, i.e. if nAgents = 50, nAgentsMax = 100 and nSimPoints = 3, 
     # then the architectures are trained on 50, 75 and 100 agents.
-commRadius = 2. # Communication radius
-repelDist = 1. # Minimum distance before activating repelling potential
-nTrain = 750 # Number of training samples
-nValid = 30 # Number of valid samples
-nTest = 30 # Number of testing samples
-duration = 10 # Duration of the trajectory
+commRadius = 5. # Communication radius
+repelDist = 2. # Minimum distance before activating repelling potential
+nTrain = 1200 # Number of training samples
+nValid = 75 # Number of valid samples
+nTest = 50 # Number of testing samples
+duration = 3 # Duration of the trajectory
 samplingTime = 0.1 # Sampling time
 initVelValue = 4. # Initial velocities are samples from an interval
     # [-initVelValue, initVelValue]
@@ -140,8 +140,8 @@ evaluator = evaluation.evaluate
 #\\\ Overall training options
 #probExpert = 0.993 # Probability of choosing the expert in DAGger
 #DAGgerType = 'fixedBatch' # 'replaceTimeBatch', 'randomEpoch'
-nEpochs = 50 # Number of epochs
-batchSize = 20 # Batch size
+nEpochs = 60 # Number of epochs
+batchSize = 30 # Batch size
 doLearningRateDecay = False # Learning rate decay
 learningRateDecayRate = 0.9 # Rate
 learningRateDecayPeriod = 1 # How many epochs after which update the lr
@@ -581,6 +581,8 @@ for realization in range(nRealizations):
 
     # And we also need to save 'nBatch' but is the same for all models, so
     if doFigs:
-        nBatches = thisTrainVars['nBatches']     
+        nBatches = thisTrainVars['nBatches']
 
-
+    plt.plot(np.arange(0, len(thisTrainVars['lossTrain'])), thisTrainVars['lossTrain'])
+    plt.plot(np.arange(0, len(thisTrainVars['lossValid'])), thisTrainVars['lossValid'])
+    plt.show()

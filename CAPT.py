@@ -504,7 +504,7 @@ class CAPT(_data):
             for goal in range(0, n_goals):
                 x_0 = X_0[sample, goal, 0]
                 y_0 = X_0[sample, goal, 1]
-                radius = np.random.uniform(0, 1)
+                radius = np.random.uniform(0, 0.5)
                 phi = np.random.uniform(0, 2*np.math.pi)
                 goal_position[sample, goal] = np.array([radius * np.math.cos(phi) + x_0, radius * np.math.sin(phi) + y_0])
 
@@ -878,12 +878,25 @@ class CAPT(_data):
                         t_samples, 
                         n_agents, 
                         2))
+
+        accel_all = np.zeros((n_samples, t_samples, n_agents, 2))
+
         
         pos_all[:, 0, :, :] = X_0
 
          # If there is no architecture, we use CAPT. Else, we use the GNN.
         if archit == None:
-            accel_all = self.compute_acceleration(X = None, clip=True, t_0 = 0)
+            k = 3
+            x_f = self.capt_trajectory(doPrint=False)[:,-1,:,:] - X_0
+            #accel = x_f / (0.1*k *(self.t_f - 0.1*k/2))
+
+            accel = 4*x_f / self.t_f**2
+
+            for t in range(0, int(t_samples / 2)):
+                accel_all[:,t,:,:] = accel
+                if not t == 0:
+                    accel_all[:,-t,:,:] = -accel
+                accel_all = np.clip(accel_all, -max_accel, max_accel)
             use_archit = False
         else:
             accel_all = np.zeros((n_samples, t_samples, n_agents, 2))
@@ -896,30 +909,28 @@ class CAPT(_data):
         
         for t in np.arange(1, t_samples):
             if (not use_archit):
-                if (t % 25 == 0):
+                if (False):
                     # CAPT
                     new_vel = self.compute_velocity(X = pos_all, t_0 = t)[:, 1, :, :]
                     new_accel = (new_vel - vel_all[:, t-1, :, :]) / 0.1
                     accel_all[:, t-1, :, :] = np.clip(new_accel, -max_accel, max_accel)
             else:
-                if (t % 10 == 0 or t == 0):
-                    # GNN output
-                    curr_pos = np.expand_dims(pos_all[:, t-1, :, :], 1)
+                curr_pos = np.expand_dims(pos_all[:, t-1, :, :], 1)
 
-                    curr_comm_graph = self.compute_communication_graph(curr_pos, self.degree, doPrint=False)
-                    curr_state = self.compute_state(curr_pos, self.G_all, commGraph=curr_comm_graph, degree=self.degree, doPrint=False)
-                    graph_all[:, t-1, :, :] = curr_comm_graph.squeeze(1)
-                    state_all[:, t-1, :, :] = curr_state.squeeze(1)
+                curr_comm_graph = self.compute_communication_graph(curr_pos, self.degree, doPrint=False)
+                curr_state = self.compute_state(curr_pos, self.G_all, commGraph=curr_comm_graph, degree=self.degree, doPrint=False)
+                graph_all[:, t-1, :, :] = curr_comm_graph.squeeze(1)
+                state_all[:, t-1, :, :] = curr_state.squeeze(1)
 
-                    x = torch.tensor(state_all[:, 0:t, :, :])
-                    S = torch.tensor(graph_all[:, 0:t, :, :]) 
+                x = torch.tensor(state_all[:, 0:t, :, :])
+                S = torch.tensor(graph_all[:, 0:t, :, :]) 
 
-                    with torch.no_grad():
-                        new_accel = archit(x, S)
-                        new_accel = new_accel.numpy()
-                        new_accel = np.transpose(np.clip(new_accel, -max_accel, max_accel), (0, 1, 3, 2))
-                    
-                    accel_all[:, t-1, :, :] = new_accel[:, -1, :, :]
+                with torch.no_grad():
+                    new_accel = archit(x, S)
+                    new_accel = new_accel.numpy()
+                    new_accel = np.transpose(np.clip(new_accel, -max_accel, max_accel), (0, 1, 3, 2))
+                
+                accel_all[:, t-1, :, :] = new_accel[:, -1, :, :]
                 
             vel_all[:, t, :, :] = vel_all[:, t - 1, :, :] \
                         + accel_all[:, t-1, :, :] * 0.1 
@@ -1145,52 +1156,51 @@ class CAPT(_data):
 # Driver #
 ##########
 
+if __name__ == "__main__":
+    capt = CAPT(n_agents = 10,
+                min_dist = 0.5, 
+                nTrain=30,
+                nTest=30,
+                nValid=30,
+                t_f = 3, 
+                max_accel = 10,
+                degree = 3,)
 
-# print('test')
-# capt = CAPT(n_agents = 10,
-#             min_dist = 0.5, 
-#             nTrain=1000,
-#             nTest=30,
-#             nValid=30,
-#             t_f = 3, 
-#             max_accel = 10,
-#             degree = 3,)
-
-# with open('dataset.pickle', 'wb') as handle:
-#     pickle.dump(capt, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
+    with open('dataset.pickle', 'wb') as handle:
+        pickle.dump(capt, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-# # Plotting (uncomment to visualize trajectory)
 
-# sample = 5
-# pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
+    # Plotting (uncomment to visualize trajectory)
 
-# print(capt.evaluate(pos, capt.G_all))
+    sample = 5
+    pos, vel, accel = capt.pos_all, capt.vel_all, capt.accel_all
 
-# for t in range(0, pos.shape[1]):
-#     plt.scatter(pos[sample, t, :, 0], 
-#                 pos[sample, t, :, 1], 
-#                 marker='.', 
-#                 color='gray',
-#                 label='')
+    print(capt.evaluate(pos, capt.G_all))
 
-# plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
-#                 label="goal", marker='x', color='r')
+    for t in range(0, pos.shape[1]):
+        plt.scatter(pos[sample, t, :, 0], 
+                    pos[sample, t, :, 1], 
+                    marker='.', 
+                    color='gray',
+                    label='')
 
-# plt.scatter(pos[sample, 0, :, 0], 
-#             pos[sample, 0, :, 1], 
-#             marker='o', 
-#             color='red',
-#             label='start')
+    plt.scatter(capt.G_all[sample, :, 0], capt.G_all[sample, :, 1], 
+                    label="goal", marker='x', color='r')
 
-# state = capt.state_all[0]
-# pos = capt.pos_all[0]
-# goals = capt.G_all[0]
-# accel = capt.accel_all[0]
+    plt.scatter(pos[sample, 0, :, 0], 
+                pos[sample, 0, :, 1], 
+                marker='o', 
+                color='red',
+                label='start')
 
-# plt.grid()    
-# plt.title('Trajectories')
-# plt.legend()
-# plt.show()
-# plt.savefig('/home/jcervino/summer-research/constrained-RL/plots/img-test.png')
+    state = capt.state_all[0]
+    pos = capt.pos_all[0]
+    goals = capt.G_all[0]
+    accel = capt.accel_all[0]
+
+    plt.grid()    
+    plt.title('Trajectories')
+    plt.legend()
+    plt.show()
+
